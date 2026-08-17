@@ -223,10 +223,16 @@ const TeacherView = {
                 const res = await API.connectStudent(studentCode);
                 App.toast(res.message || 'Student Connected ✓', 'success');
                 App.closeModal();
-                const root = document.querySelector('#view-teacher') || document.getElementById('app-root') || document.body;
-                await this.loadClasses(root);
+                if (res && res.student) {
+                    this.students = (this.students || []).filter(s => (s.uid !== res.student.uid && s.student_id !== res.student.student_id && s.studentCode !== res.student.studentCode));
+                    this.students.push(res.student);
+                }
                 const tabContent = document.querySelector('#teacher-tab-content');
-                if (tabContent) await this.renderTabContent(tabContent);
+                if (tabContent) {
+                    await this.renderColorCodedStudentTable(tabContent);
+                }
+                const root = document.querySelector('#view-teacher') || document.body;
+                this.loadClasses(root);
             } catch (err) {
                 App.toast(err.message || 'Failed to connect student', 'danger');
             }
