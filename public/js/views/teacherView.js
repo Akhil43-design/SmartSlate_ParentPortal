@@ -77,6 +77,9 @@ const TeacherView = {
         try {
             const data = await API.getTeacherClasses();
             this.classes = data.classes || [];
+            if (data.students && Array.isArray(data.students)) {
+                this.students = data.students;
+            }
 
             const select = container.querySelector('#teacher-class-select');
             
@@ -101,6 +104,7 @@ const TeacherView = {
             this.updateClassStatsChip(container);
             await this.renderTabContent(container.querySelector('#teacher-tab-content'));
         } catch (err) {
+            console.error('Failed to load teacher classes:', err);
             App.toast('Failed to load teacher classes: ' + err.message, 'danger');
         }
     },
@@ -272,13 +276,21 @@ const TeacherView = {
 
     // 1. Color-Coded Student Table View
     async renderColorCodedStudentTable(container) {
-        let res;
         if (this.currentClassId && this.currentClassId !== 'all') {
-            res = await API.getClassStudents(this.currentClassId);
-        } else {
-            res = await API.getAllStudents();
+            try {
+                const res = await API.getClassStudents(this.currentClassId);
+                this.students = res.students || [];
+            } catch (e) {
+                console.warn("[Teacher] Class student fetch note:", e.message);
+            }
+        } else if (!this.students || !this.students.length) {
+            try {
+                const res = await API.getAllStudents();
+                this.students = res.students || [];
+            } catch (e) {
+                console.warn("[Teacher] All students fetch note:", e.message);
+            }
         }
-        this.students = res.students || [];
 
         if (!this.students.length) {
             container.innerHTML = `
