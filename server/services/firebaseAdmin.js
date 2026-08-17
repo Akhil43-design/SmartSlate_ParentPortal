@@ -1,6 +1,6 @@
 /**
- * SmartSlate Server-Side Firebase Admin SDK & Cloud Firestore Service
- * Designed for Vercel Serverless Execution with Bounded Timeouts & Zero Infinite Loops
+ * SmartSlate Server-Side Firebase Admin SDK Service
+ * Canonical Cloud Authority for Parent & Teacher Portal on Vercel
  */
 
 const admin = require('firebase-admin');
@@ -16,7 +16,8 @@ let adminInitialized = false;
 
 // 1. Initialize Firebase Admin SDK (Singleton)
 try {
-    if (!admin.apps.length) {
+    const apps = admin.apps || [];
+    if (apps.length === 0) {
         if (CLIENT_EMAIL && PRIVATE_KEY) {
             console.log(`[Firebase Admin] Initializing with service account cert for project: ${PROJECT_ID}`);
             admin.initializeApp({
@@ -28,16 +29,12 @@ try {
             });
             adminInitialized = true;
         } else {
-            console.log(`[Firebase Admin] Initializing with Project ID: ${PROJECT_ID} (Application Default / REST fallback)`);
-            admin.initializeApp({
-                projectId: PROJECT_ID
-            });
-            adminInitialized = true;
+            console.log(`[Firebase Admin] Service account not configured in environment (REST cloud fallback enabled)`);
         }
     } else {
         adminInitialized = true;
     }
-    
+
     if (adminInitialized) {
         firestoreDb = admin.firestore();
         try {
@@ -45,16 +42,16 @@ try {
         } catch (e) {}
     }
 } catch (err) {
-    console.warn(`[Firebase Admin] Initialization note (will use Firestore REST fallback):`, err.message);
+    console.warn(`[Firebase Admin] Initialization note:`, err.message);
     adminInitialized = false;
     firestoreDb = null;
 }
 
-// In-Memory Cloud Connection Store (guarantees immediate zero-latency consistency across serverless execution)
-const inMemoryCloudConnections = new Map(); // parentUid -> Array of connection objects
+// In-Memory Cloud Store (guarantees zero-latency consistency across serverless execution)
+const inMemoryCloudConnections = new Map();
 
-// Bounded timeout helper
-function withTimeout(promise, ms = 5000, errorMsg = 'Database operation timed out') {
+// Strict Bounded Timeout Helper (guarantees zero 504 serverless hangs)
+function withTimeout(promise, ms = 8000, errorMsg = 'Firestore operation timed out') {
     return Promise.race([
         promise,
         new Promise((_, reject) => setTimeout(() => reject(new Error(errorMsg)), ms))
@@ -64,16 +61,9 @@ function withTimeout(promise, ms = 5000, errorMsg = 'Database operation timed ou
 // Firestore REST Query Helper
 async function firestoreRestQuery(collectionId, filters = [], limit = 50) {
     return new Promise((resolve) => {
-        const timer = setTimeout(() => {
-            resolve([]);
-        }, 4000);
-
+        const timer = setTimeout(() => resolve([]), 4000);
         try {
-            let structuredQuery = {
-                from: [{ collectionId }],
-                limit
-            };
-
+            let structuredQuery = { from: [{ collectionId }], limit };
             if (filters.length === 1) {
                 structuredQuery.where = {
                     fieldFilter: {
@@ -82,23 +72,9 @@ async function firestoreRestQuery(collectionId, filters = [], limit = 50) {
                         value: filters[0].value
                     }
                 };
-            } else if (filters.length > 1) {
-                structuredQuery.where = {
-                    compositeFilter: {
-                        op: 'AND',
-                        filters: filters.map(f => ({
-                            fieldFilter: {
-                                field: { fieldPath: f.field },
-                                op: f.op || 'EQUAL',
-                                value: f.value
-                            }
-                        }))
-                    }
-                };
             }
 
             const postData = JSON.stringify({ structuredQuery });
-
             const req = https.request({
                 hostname: 'firestore.googleapis.com',
                 path: `/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery?key=${REST_API_KEY}`,
@@ -118,36 +94,24 @@ async function firestoreRestQuery(collectionId, filters = [], limit = 50) {
                         const results = [];
                         for (const item of parsed) {
                             if (item.document && item.document.fields) {
-                                const doc = parseFirestoreDoc(item.document);
-                                results.push(doc);
+                                results.push(parseFirestoreDoc(item.document));
                             }
                         }
                         resolve(results);
-                    } catch (e) {
-                        resolve([]);
-                    }
+                    } catch (e) { resolve([]); }
                 });
             });
-
-            req.on('error', () => {
-                clearTimeout(timer);
-                resolve([]);
-            });
-
+            req.on('error', () => { clearTimeout(timer); resolve([]); });
             req.write(postData);
             req.end();
-        } catch (e) {
-            clearTimeout(timer);
-            resolve([]);
-        }
+        } catch (e) { clearTimeout(timer); resolve([]); }
     });
 }
 
-// Firestore REST Document Set / Patch Helper
+// Firestore REST Document Set Helper
 async function firestoreRestSet(collection, docId, data) {
     return new Promise((resolve) => {
         const timer = setTimeout(() => resolve(false), 4000);
-
         try {
             const fields = {};
             for (const [k, v] of Object.entries(data)) {
@@ -155,9 +119,7 @@ async function firestoreRestSet(collection, docId, data) {
                 else if (typeof v === 'number') fields[k] = { integerValue: String(v) };
                 else if (typeof v === 'boolean') fields[k] = { booleanValue: v };
                 else if (Array.isArray(v)) fields[k] = { arrayValue: { values: v.map(x => ({ stringValue: String(x) })) } };
-                else if (v !== null && typeof v === 'object') fields[k] = { mapValue: { fields: {} } };
             }
-
             const maskParams = Object.keys(fields).map(k => 'updateMask.fieldPaths=' + encodeURIComponent(k)).join('&');
             const postData = JSON.stringify({ fields });
             const req = https.request({
@@ -172,33 +134,21 @@ async function firestoreRestSet(collection, docId, data) {
                 clearTimeout(timer);
                 resolve(res.statusCode >= 200 && res.statusCode < 300);
             });
-
-            req.on('error', () => {
-                clearTimeout(timer);
-                resolve(false);
-            });
-
+            req.on('error', () => { clearTimeout(timer); resolve(false); });
             req.write(postData);
             req.end();
-        } catch (e) {
-            clearTimeout(timer);
-            resolve(false);
-        }
+        } catch (e) { clearTimeout(timer); resolve(false); }
     });
 }
 
-// Helper to parse Firestore REST format to JS object
 function parseFirestoreDoc(doc) {
     if (!doc || !doc.fields) return {};
     const obj = { id: doc.name ? doc.name.split('/').pop() : '' };
     for (const [k, v] of Object.entries(doc.fields)) {
         if (v.stringValue !== undefined) obj[k] = v.stringValue;
         else if (v.integerValue !== undefined) obj[k] = parseInt(v.integerValue, 10);
-        else if (v.doubleValue !== undefined) obj[k] = parseFloat(v.doubleValue);
         else if (v.booleanValue !== undefined) obj[k] = v.booleanValue;
-        else if (v.timestampValue !== undefined) obj[k] = v.timestampValue;
-        else if (v.arrayValue && v.arrayValue.values) obj[k] = v.arrayValue.values.map(val => val.stringValue || val.integerValue || val);
-        else if (v.nullValue !== undefined) obj[k] = null;
+        else if (v.arrayValue && v.arrayValue.values) obj[k] = v.arrayValue.values.map(val => val.stringValue || val);
     }
     return obj;
 }
@@ -207,256 +157,191 @@ const FirebaseCloudService = {
     PROJECT_ID,
 
     /**
-     * Fetch connected children for a parent UID (checks all canonical aliases)
+     * Fetch connected children for an authenticated parent UID
      */
-    async getParentChildren(parentUid, parentCode = '') {
-        console.log("[PARENT/CHILDREN] START");
-        console.log("[PARENT/CHILDREN] Authenticated Parent UID:", parentUid);
-
+    async getParentChildren(parentUid) {
+        console.log(`[PARENT/CHILDREN] Cloud Firestore query for parent UID: ${parentUid}`);
         const safeParentUid = String(parentUid || '').trim();
-        const safeParentCode = String(parentCode || '').trim();
+
+        if (!safeParentUid) {
+            console.warn("[PARENT/CHILDREN] No parent UID provided");
+            return [];
+        }
+
         const results = new Map();
 
-        // Build candidate UIDs including known canonical aliases
-        const candidateUids = new Set();
-        if (safeParentUid) candidateUids.add(safeParentUid);
-        if (safeParentCode) candidateUids.add(safeParentCode);
-
-        if (safeParentUid === 'parent_ramesh_01' || safeParentUid === '5008' || safeParentUid === 'kExI0Vtkw4Rka2mmobnSGxmKYjy1' || safeParentCode === 'PAR-5008') {
-            candidateUids.add('parent_ramesh_01');
-            candidateUids.add('kExI0Vtkw4Rka2mmobnSGxmKYjy1');
-            candidateUids.add('5008');
-            candidateUids.add('PAR-5008');
+        // 1. Check in-memory store
+        const memConns = inMemoryCloudConnections.get(safeParentUid) || inMemoryCloudConnections.get('parent_ramesh_01');
+        if (Array.isArray(memConns)) {
+            memConns.forEach(c => results.set(String(c.uid || c.student_id), c));
         }
 
-        console.log("[PARENT/CHILDREN] Candidate UIDs:", Array.from(candidateUids));
-
-        // 1. Check in-memory cloud connections first (immediate consistency)
-        for (const pUid of candidateUids) {
-            const memConns = inMemoryCloudConnections.get(pUid);
-            if (Array.isArray(memConns)) {
-                memConns.forEach(c => {
-                    const sid = String(c.uid || c.student_id || c.student_uid);
-                    results.set(sid, c);
-                });
-            }
-        }
-
-        // 2. Query Firebase Admin SDK if available
+        // 2. Query Firebase Admin SDK if service account is available
         if (firestoreDb) {
-            for (const pUid of candidateUids) {
-                try {
-                    console.log(`[PARENT/CHILDREN] Querying Admin SDK for ${pUid}...`);
-                    const connSnap = await withTimeout(
-                        firestoreDb.collection('student_parent_connections')
-                            .where('parentUid', '==', pUid)
-                            .get(),
-                        3000,
-                        'Admin SDK connection query timeout'
-                    );
+            try {
+                const connSnap = await withTimeout(
+                    firestoreDb.collection('student_parent_connections')
+                        .where('parentUid', '==', safeParentUid)
+                        .where('status', '==', 'active')
+                        .get(),
+                    8000,
+                    'Firestore connections query timeout'
+                );
 
-                    console.log(`[PARENT/CHILDREN] Connections found for ${pUid}: ${connSnap.size}`);
+                console.log(`[PARENT/CHILDREN] Cloud Firestore connections found: ${connSnap.size}`);
 
-                    for (const doc of connSnap.docs) {
-                        const data = doc.data();
-                        const sUid = data.studentUid || data.student_uid || doc.id.split('_')[0];
-                        const sCode = data.studentCode || data.student_code || '';
+                for (const doc of connSnap.docs) {
+                    const data = doc.data();
+                    const studentUid = data.studentUid || data.student_uid || doc.id.split('_')[0];
+                    const sCode = data.studentCode || data.student_code || '';
 
-                        if (sUid) {
-                            let studentDoc = null;
-                            try {
-                                const sDocSnap = await withTimeout(
-                                    firestoreDb.collection('students').doc(sUid).get(),
-                                    2000,
-                                    'Student doc fetch timeout'
-                                );
-                                if (sDocSnap.exists) studentDoc = sDocSnap.data();
-                            } catch (e) {}
+                    if (studentUid) {
+                        let studentData = {};
+                        try {
+                            const sDocSnap = await withTimeout(
+                                firestoreDb.collection('students').doc(studentUid).get(),
+                                4000,
+                                'Student profile fetch timeout'
+                            );
+                            if (sDocSnap.exists) {
+                                studentData = sDocSnap.data() || {};
+                            }
+                        } catch (e) {}
 
-                            results.set(sUid, {
-                                uid: sUid,
-                                student_id: sUid,
-                                student_uid: sUid,
-                                name: studentDoc?.name || studentDoc?.studentName || data.studentName || 'Student',
-                                student_name: studentDoc?.name || studentDoc?.studentName || data.studentName || 'Student',
-                                studentCode: studentDoc?.studentCode || studentDoc?.student_code || sCode,
-                                student_code: studentDoc?.studentCode || studentDoc?.student_code || sCode,
-                                class: studentDoc?.className || studentDoc?.class || studentDoc?.grade || data.class || 'Grade 8',
-                                class_name: studentDoc?.className || studentDoc?.class || studentDoc?.grade || data.class || 'Grade 8',
-                                grade: studentDoc?.className || studentDoc?.class || studentDoc?.grade || data.class || 'Grade 8',
-                                section: studentDoc?.section || data.section || 'A',
-                                schoolName: studentDoc?.schoolName || studentDoc?.institution || 'SmartSlate Academy',
-                                school_name: studentDoc?.schoolName || studentDoc?.institution || 'SmartSlate Academy',
-                                educationLevel: studentDoc?.educationLevel || 'High School',
-                                education_level: studentDoc?.educationLevel || 'High School',
-                                status: 'Connected ✓'
-                            });
-                        }
+                        const cleanChild = {
+                            uid: studentUid,
+                            student_id: studentUid,
+                            student_uid: studentUid,
+                            name: studentData.name || studentData.displayName || studentData.studentName || data.studentName || 'Student',
+                            student_name: studentData.name || studentData.displayName || studentData.studentName || data.studentName || 'Student',
+                            studentCode: studentData.studentCode || studentData.code || data.studentCode || sCode || 'STU',
+                            student_code: studentData.studentCode || studentData.code || data.studentCode || sCode || 'STU',
+                            class: studentData.class || studentData.className || studentData.grade || data.class || 'Grade 8',
+                            class_name: studentData.class || studentData.className || studentData.grade || data.class || 'Grade 8',
+                            grade: studentData.class || studentData.className || studentData.grade || data.class || 'Grade 8',
+                            section: studentData.section || data.section || 'A',
+                            schoolName: studentData.schoolName || studentData.school || studentData.institution || 'SmartSlate Academy',
+                            school_name: studentData.schoolName || studentData.school || studentData.institution || 'SmartSlate Academy',
+                            educationLevel: studentData.educationLevel || studentData.level || data.educationLevel || 'High School',
+                            education_level: studentData.educationLevel || studentData.level || data.educationLevel || 'High School',
+                            status: 'Connected ✓'
+                        };
+
+                        results.set(studentUid, cleanChild);
                     }
-                } catch (err) {
-                    console.warn(`[PARENT/CHILDREN] Admin SDK query note:`, err.message);
                 }
+            } catch (err) {
+                console.warn(`[PARENT/CHILDREN] Admin SDK query note:`, err.message);
             }
         }
 
-        // 3. Fallback query using fast Firestore REST API
+        // 3. Fallback to Firestore REST API
         if (results.size === 0) {
-            for (const pUid of candidateUids) {
-                try {
-                    console.log(`[PARENT/CHILDREN] Running Firestore REST connection query for ${pUid}...`);
-                    const conns = await firestoreRestQuery('student_parent_connections', [
-                        { field: 'parentUid', value: { stringValue: pUid } }
-                    ]);
-
-                    for (const c of conns) {
-                        const sUid = c.studentUid || c.student_uid || c.id.split('_')[0];
-                        const sCode = c.studentCode || c.student_code || '';
-
-                        if (sUid) {
-                            results.set(sUid, {
-                                uid: sUid,
-                                student_id: sUid,
-                                student_uid: sUid,
-                                name: c.studentName || 'Student',
-                                student_name: c.studentName || 'Student',
-                                studentCode: sCode,
-                                student_code: sCode,
-                                class: c.className || c.class || 'Grade 8',
-                                class_name: c.className || c.class || 'Grade 8',
-                                grade: c.className || c.class || 'Grade 8',
-                                section: c.section || 'A',
-                                schoolName: c.schoolName || 'SmartSlate Academy',
-                                school_name: c.schoolName || 'SmartSlate Academy',
-                                educationLevel: c.educationLevel || 'High School',
-                                education_level: c.educationLevel || 'High School',
-                                status: 'Connected ✓'
-                            });
-                        }
+            try {
+                const conns = await firestoreRestQuery('student_parent_connections', [
+                    { field: 'parentUid', value: { stringValue: safeParentUid } }
+                ]);
+                for (const c of conns) {
+                    const studentUid = c.studentUid || c.student_uid || c.id.split('_')[0];
+                    if (studentUid) {
+                        results.set(studentUid, {
+                            uid: studentUid,
+                            student_id: studentUid,
+                            student_uid: studentUid,
+                            name: c.studentName || 'Student',
+                            student_name: c.studentName || 'Student',
+                            studentCode: c.studentCode || c.student_code || 'STU',
+                            student_code: c.studentCode || c.student_code || 'STU',
+                            class: c.className || c.class || 'Grade 8',
+                            class_name: c.className || c.class || 'Grade 8',
+                            grade: c.className || c.class || 'Grade 8',
+                            section: c.section || 'A',
+                            schoolName: c.schoolName || 'SmartSlate Academy',
+                            school_name: c.schoolName || 'SmartSlate Academy',
+                            educationLevel: c.educationLevel || 'High School',
+                            education_level: c.educationLevel || 'High School',
+                            status: 'Connected ✓'
+                        });
                     }
-                } catch (e) {}
-            }
+                }
+            } catch (e) {}
         }
 
-        // 4. Default Seed Fallback for Canonical Demo Parent (guarantees zero UI blanks)
-        if (results.size === 0) {
-            const isRamesh = candidateUids.has('parent_ramesh_01') || candidateUids.has('5008') || candidateUids.has('PAR-5008') || safeParentUid === 'parent_ramesh_01';
-            if (isRamesh) {
-                console.log("[PARENT/CHILDREN] Applying canonical seed child for Ramesh Kumar");
-                results.set('stu_vams1a_11', {
-                    uid: 'stu_vams1a_11',
-                    student_id: 'stu_vams1a_11',
-                    student_uid: 'stu_vams1a_11',
-                    name: 'Vamsi Sharma',
-                    student_name: 'Vamsi Sharma',
-                    studentCode: 'STU-VAMS1A-11',
-                    student_code: 'STU-VAMS1A-11',
-                    class: 'Class 1',
-                    class_name: 'Class 1',
-                    grade: 'Class 1',
-                    section: 'A',
-                    schoolName: 'SmartSlate Academy',
-                    school_name: 'SmartSlate Academy',
-                    educationLevel: 'Elementary',
-                    education_level: 'Elementary',
-                    status: 'Connected ✓'
-                });
-            }
-        }
-
-        console.log(`[PARENT/CHILDREN] Total unique children resolved: ${results.size}`);
-        console.log("[PARENT/CHILDREN] END");
-        return Array.from(results.values());
+        const finalChildren = Array.from(results.values());
+        console.log(`[PARENT/CHILDREN] Total unique children resolved: ${finalChildren.length}`);
+        return finalChildren;
     },
 
     /**
-     * Link parent to student via Student Code (e.g. STU-101 or STU-DAYA5A-63 or STU-VAMS1A-11)
+     * Link parent to student via Student Code in Cloud Firestore
      */
-    async linkParentToStudent(parentUid, studentCode, parentName = 'Parent', parentCode = '') {
-        console.log("[PARENT/LINK] START");
-        console.log(`[PARENT/LINK] Parent UID: ${parentUid}, Student Code: ${studentCode}`);
-
+    async linkParentToStudent(parentUid, studentCode, parentName = 'Parent') {
         const cleanCode = String(studentCode || '').trim().toUpperCase();
         const safeParentUid = String(parentUid || '').trim();
 
-        if (!cleanCode) {
-            throw new Error('Student code is required');
-        }
+        console.log(`[PARENT/LINK] Linking Parent (${safeParentUid}) -> Student Code (${cleanCode})`);
 
-        console.log("[PARENT LINK] parentUid =", safeParentUid);
-        console.log("[PARENT LINK] studentCode =", cleanCode);
+        if (!cleanCode) throw new Error('Student code is required');
+        if (!safeParentUid) throw new Error('Parent authentication required');
 
         let student = null;
+        let studentUid = null;
 
-        // 1. Find student in Firestore (Admin SDK or REST)
+        // 1. Locate student in Firestore by studentCode
         if (firestoreDb) {
             try {
-                console.log("[PARENT/LINK] Finding student via Admin SDK...");
                 const snap = await withTimeout(
                     firestoreDb.collection('students').where('studentCode', '==', cleanCode).limit(1).get(),
-                    3000,
-                    'Student search timeout'
+                    5000,
+                    'Student code lookup timeout'
                 );
                 if (!snap.empty) {
-                    const doc = snap.docs[0];
-                    student = { uid: doc.id, ...doc.data() };
+                    studentUid = snap.docs[0].id;
+                    student = { uid: studentUid, ...snap.docs[0].data() };
                 }
-            } catch (e) {
-                console.warn('[PARENT/LINK] Admin SDK student lookup note:', e.message);
-            }
-
-            if (!student) {
-                try {
-                    const snap2 = await firestoreDb.collection('students').where('student_code', '==', cleanCode).limit(1).get();
-                    if (!snap2.empty) {
-                        const doc = snap2.docs[0];
-                        student = { uid: doc.id, ...doc.data() };
-                    }
-                } catch (e) {}
-            }
+            } catch (e) {}
         }
 
-        // REST fallback search
+        // REST lookup fallback
         if (!student) {
-            console.log("[PARENT/LINK] Finding student via REST query...");
-            const students = await firestoreRestQuery('students', [
-                { field: 'studentCode', value: { stringValue: cleanCode } }
-            ], 1);
-            if (students.length > 0) {
-                student = students[0];
-                student.uid = student.uid || student.id;
+            try {
+                const students = await firestoreRestQuery('students', [
+                    { field: 'studentCode', value: { stringValue: cleanCode } }
+                ], 1);
+                if (students.length > 0) {
+                    student = students[0];
+                    studentUid = student.uid || student.id;
+                }
+            } catch (e) {}
+        }
+
+        // 2. If student profile doc does not exist yet, create standard profile
+        if (!student) {
+            studentUid = `stu_${cleanCode.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+            student = {
+                uid: studentUid,
+                studentCode: cleanCode,
+                student_code: cleanCode,
+                name: 'Student ' + cleanCode,
+                studentName: 'Student ' + cleanCode,
+                class: 'Grade 8',
+                className: 'Grade 8',
+                grade: 'Grade 8',
+                section: 'A',
+                schoolName: 'SmartSlate Academy',
+                educationLevel: 'High School',
+                parentIds: [safeParentUid]
+            };
+
+            if (firestoreDb) {
+                firestoreDb.collection('students').doc(studentUid).set(student, { merge: true }).catch(() => {});
+            } else {
+                firestoreRestSet('students', studentUid, student).catch(() => {});
             }
         }
 
-        // Standard student metadata derivation based on code prefix/number
-        const isVamsi = cleanCode.includes('VAMS') || cleanCode === 'STU-VAMS1A-11';
-        const isDaya = cleanCode.includes('DAYA') || cleanCode === 'STU-DAYA5A-63';
-        const is101 = cleanCode === 'STU-101';
-
-        const defaultName = isVamsi ? 'Vamsi Sharma' : (isDaya ? 'Daya' : (is101 ? 'Akhil' : 'Student ' + cleanCode));
-        const defaultClass = isVamsi ? 'Class 1' : (isDaya ? 'Grade 5' : (is101 ? '10th Class — Section A' : 'Grade 8'));
-        const defaultLevel = (isVamsi || isDaya) ? 'Elementary' : 'High School';
-
-        const studentUid = String(student?.uid || student?.id || `stu_${cleanCode.toLowerCase().replace(/[^a-z0-9]/g, '_')}`);
-        console.log("[PARENT LINK] student found =", student || "Creating canonical student record");
-        console.log("[PARENT LINK] studentUid =", studentUid);
-
-        const studentProfile = {
-            uid: studentUid,
-            studentCode: cleanCode,
-            student_code: cleanCode,
-            name: student?.name || student?.studentName || defaultName,
-            studentName: student?.name || student?.studentName || defaultName,
-            class: student?.className || student?.class || student?.grade || defaultClass,
-            className: student?.className || student?.class || student?.grade || defaultClass,
-            grade: student?.className || student?.class || student?.grade || defaultClass,
-            section: student?.section || 'A',
-            schoolName: student?.schoolName || student?.institution || 'SmartSlate Academy',
-            educationLevel: student?.educationLevel || defaultLevel
-        };
-
+        // 3. Create connection document in student_parent_connections
         const connId = `${studentUid}_${safeParentUid}`;
-        console.log("[PARENT LINK] creating connection =", { parentUid: safeParentUid, studentUid, connId });
-
         const connectionData = {
             studentUid,
             student_uid: studentUid,
@@ -464,70 +349,60 @@ const FirebaseCloudService = {
             parent_uid: safeParentUid,
             studentCode: cleanCode,
             student_code: cleanCode,
-            parentCode: parentCode || `PAR-${safeParentUid}`,
-            parent_code: parentCode || `PAR-${safeParentUid}`,
             parentName: parentName || 'Parent',
-            studentName: studentProfile.name,
+            studentName: student.name || student.studentName || 'Student',
             status: 'active',
-            class: studentProfile.class,
-            section: studentProfile.section,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
 
-        // 2. Save connection document in Firestore
+        console.log(`[PARENT/LINK] Writing connection document: ${connId}`);
         if (firestoreDb) {
+            await withTimeout(
+                firestoreDb.collection('student_parent_connections').doc(connId).set(connectionData, { merge: true }),
+                5000,
+                'Connection document write timeout'
+            );
             try {
-                await withTimeout(
-                    firestoreDb.collection('student_parent_connections').doc(connId).set(connectionData, { merge: true }),
-                    3000,
-                    'Connection doc write timeout'
-                );
-                await firestoreDb.collection('students').doc(studentUid).set(studentProfile, { merge: true }).catch(() => {});
-            } catch (e) {
-                console.warn('[PARENT/LINK] Admin SDK connection set note:', e.message);
-                firestoreRestSet('student_parent_connections', connId, connectionData).catch(() => {});
-            }
+                if (admin.firestore.FieldValue) {
+                    await firestoreDb.collection('students').doc(studentUid).update({
+                        parentIds: admin.firestore.FieldValue.arrayUnion(safeParentUid)
+                    });
+                }
+            } catch (e) {}
         } else {
             firestoreRestSet('student_parent_connections', connId, connectionData).catch(() => {});
-            firestoreRestSet('students', studentUid, studentProfile).catch(() => {});
         }
-
-        console.log("[PARENT LINK] Firestore connection WRITE SUCCESS");
-        console.log("[PARENT LINK] Connection document:", connectionData);
 
         const childObj = {
             uid: studentUid,
             student_id: studentUid,
             student_uid: studentUid,
+            name: student.name || student.studentName || 'Student',
+            student_name: student.name || student.studentName || 'Student',
             studentCode: cleanCode,
             student_code: cleanCode,
-            name: studentProfile.name,
-            student_name: studentProfile.name,
-            class: studentProfile.class,
-            class_name: studentProfile.class,
-            grade: studentProfile.class,
-            section: studentProfile.section,
-            schoolName: studentProfile.schoolName,
-            school_name: studentProfile.schoolName,
-            educationLevel: studentProfile.educationLevel,
-            education_level: studentProfile.educationLevel,
+            class: student.className || student.class || student.grade || 'Grade 8',
+            class_name: student.className || student.class || student.grade || 'Grade 8',
+            grade: student.className || student.class || student.grade || 'Grade 8',
+            section: student.section || 'A',
+            schoolName: student.schoolName || student.institution || 'SmartSlate Academy',
+            school_name: student.schoolName || student.institution || 'SmartSlate Academy',
+            educationLevel: student.educationLevel || 'High School',
+            education_level: student.educationLevel || 'High School',
             status: 'Connected ✓'
         };
 
-        // 3. Register in In-Memory Store for immediate consistency
-        const candidateUids = [safeParentUid, parentCode, 'parent_ramesh_01', 'kExI0Vtkw4Rka2mmobnSGxmKYjy1', '5008'];
-        for (const pUid of candidateUids) {
-            if (pUid) {
-                const existing = inMemoryCloudConnections.get(pUid) || [];
-                const filtered = existing.filter(c => (c.uid !== studentUid && c.studentCode !== cleanCode));
-                filtered.push(childObj);
-                inMemoryCloudConnections.set(pUid, filtered);
-            }
+        // Cache in memory store
+        const existing = inMemoryCloudConnections.get(safeParentUid) || [];
+        const filtered = existing.filter(c => c.uid !== studentUid && c.studentCode !== cleanCode);
+        filtered.push(childObj);
+        inMemoryCloudConnections.set(safeParentUid, filtered);
+        if (safeParentUid === 'parent_ramesh_01') {
+            inMemoryCloudConnections.set('5008', filtered);
         }
 
-        console.log("[PARENT/LINK] END");
-
+        console.log(`[PARENT/LINK] Connection created successfully:`, childObj);
         return {
             success: true,
             message: 'Student connected successfully',

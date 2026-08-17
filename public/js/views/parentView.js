@@ -127,136 +127,75 @@ const ParentView = {
 
     async loadChildren(container) {
         console.log("[Parent] Loading connected children...");
-
-        const parentUid = String(
-            window.firebaseAuthService?.auth?.currentUser?.uid ||
-            this.parentProfile?.uid || 
-            this.parentProfile?.id || 
-            App.currentUser?.uid || 
-            App.currentUser?.id || 
-            ''
-        ).trim();
-
-        console.log("[Parent] Firebase UID:", parentUid);
+        console.log("[Parent API] GET /api/parent/children");
 
         const switcher = container.querySelector('#parent-children-switcher-container');
         const heroCard = container.querySelector('#parent-child-hero-card');
 
         try {
-            let fetchedChildren = [];
+            const apiRes = await withTimeout(
+                API.getChildren(),
+                10000,
+                "Loading children timed out"
+            );
 
-            // 1. Direct Firestore Client Query
-            if (window.firebaseAuthService?.db || (typeof firebase !== 'undefined' && firebase.firestore)) {
-                const db = window.firebaseAuthService?.db || firebase.firestore();
-                const candidateUids = new Set();
-                if (parentUid) candidateUids.add(parentUid);
-                if (window.firebaseAuthService?.auth?.currentUser?.uid) candidateUids.add(window.firebaseAuthService.auth.currentUser.uid);
-                if (this.parentProfile?.uid) candidateUids.add(this.parentProfile.uid);
-                if (this.parentProfile?.id) candidateUids.add(String(this.parentProfile.id));
-
-                const childrenMap = new Map();
-
-                for (const pUid of candidateUids) {
-                    try {
-                        const snap = await withTimeout(
-                            db.collection("student_parent_connections")
-                              .where("parentUid", "==", pUid)
-                              .where("status", "==", "active")
-                              .get(),
-                            5000,
-                            "Firestore connections timeout"
-                        );
-
-                        console.log("[Parent] Connection documents found:", snap.size);
-
-                        for (const doc of snap.docs) {
-                            const connData = doc.data();
-                            console.log("[Parent] Connection:", doc.id, connData);
-
-                            const studentUid = connData.studentUid || connData.student_uid || doc.id.split('_')[0];
-                            if (studentUid) {
-                                let studentData = {};
-                                try {
-                                    const sDocSnap = await withTimeout(
-                                        db.collection("students").doc(studentUid).get(),
-                                        3000
-                                    );
-                                    if (sDocSnap.exists) {
-                                        studentData = sDocSnap.data() || {};
-                                    }
-                                } catch (e) {}
-
-                                console.log("[Parent] Student profile:", studentUid, studentData);
-
-                                const cleanStudent = {
-                                    uid: studentUid,
-                                    student_id: studentUid,
-                                    student_uid: studentUid,
-                                    name: studentData.name || studentData.displayName || studentData.studentName || connData.studentName || "Student",
-                                    student_name: studentData.name || studentData.displayName || studentData.studentName || connData.studentName || "Student",
-                                    class: studentData.class || studentData.className || studentData.grade || connData.class || "Grade 8",
-                                    class_name: studentData.class || studentData.className || studentData.grade || connData.class || "Grade 8",
-                                    grade: studentData.class || studentData.className || studentData.grade || connData.class || "Grade 8",
-                                    section: studentData.section || connData.section || "A",
-                                    school: studentData.school || studentData.schoolName || connData.schoolName || "SmartSlate Academy",
-                                    schoolName: studentData.school || studentData.schoolName || connData.schoolName || "SmartSlate Academy",
-                                    school_name: studentData.school || studentData.schoolName || connData.schoolName || "SmartSlate Academy",
-                                    educationLevel: studentData.educationLevel || studentData.level || connData.educationLevel || "High School",
-                                    education_level: studentData.educationLevel || studentData.level || connData.educationLevel || "High School",
-                                    studentCode: studentData.studentCode || studentData.code || connData.studentCode || connData.student_code || "STU",
-                                    student_code: studentData.studentCode || studentData.code || connData.studentCode || connData.student_code || "STU",
-                                    status: "Connected ✓"
-                                };
-
-                                console.log("[Parent] Student loaded:", cleanStudent.name, `(${cleanStudent.studentCode})`);
-                                childrenMap.set(studentUid, cleanStudent);
-                            }
-                        }
-                    } catch (e) {
-                        console.warn("[Parent] Firestore direct query note:", e.message);
-                    }
-                }
-
-                fetchedChildren = Array.from(childrenMap.values());
+            if (!apiRes?.success) {
+                throw new Error(apiRes?.error || "Unable to load children");
             }
 
-            // 2. Fast backend API fallback with 3.5-second timeout if direct Firestore returned 0
-            if (fetchedChildren.length === 0) {
-                try {
-                    const apiRes = await withTimeout(API.getChildren(), 3500, 'API getChildren timeout');
-                    if (apiRes && Array.isArray(apiRes.children) && apiRes.children.length > 0) {
-                        apiRes.children.forEach(c => {
-                            const sid = String(c.uid || c.student_id || c.student_uid || c.studentCode || c.student_code);
-                            const clean = {
-                                uid: sid,
-                                student_id: sid,
-                                student_uid: sid,
-                                name: c.name || c.displayName || c.student_name || "Student",
-                                student_name: c.name || c.displayName || c.student_name || "Student",
-                                class: c.class || c.className || c.grade || c.class_name || "Grade 8",
-                                class_name: c.class || c.className || c.grade || c.class_name || "Grade 8",
-                                section: c.section || "A",
-                                school: c.school || c.schoolName || c.school_name || "SmartSlate Academy",
-                                schoolName: c.school || c.schoolName || c.school_name || "SmartSlate Academy",
-                                school_name: c.school || c.schoolName || c.school_name || "SmartSlate Academy",
-                                educationLevel: c.educationLevel || c.level || c.education_level || "High School",
-                                education_level: c.educationLevel || c.level || c.education_level || "High School",
-                                studentCode: c.studentCode || c.code || c.student_code || "STU",
-                                student_code: c.studentCode || c.code || c.student_code || "STU",
-                                status: "Connected ✓"
-                            };
-                            console.log("[Parent] Student profile:", sid, clean);
-                            console.log("[Parent] Student loaded:", clean.name, `(${clean.studentCode})`);
-                            fetchedChildren.push(clean);
-                        });
-                    }
-                } catch (e) {
-                    console.warn("[Parent] API fallback note:", e.message);
+            this.children = Array.isArray(apiRes.children) ? apiRes.children : [];
+            console.log("[Parent] Children loaded from Firebase:", this.children.length);
+            console.log(`[Parent] Children rendered: ${this.children.length}`);
+
+            if (!this.children.length) {
+                if (switcher) {
+                    switcher.innerHTML = `<div style="color: var(--text-muted); font-size: 14px; padding: 8px 0;">No children connected yet.</div>`;
                 }
+                if (heroCard) heroCard.style.display = 'none';
+                const tabContent = container.querySelector('#parent-active-tab-content');
+                if (tabContent) {
+                    tabContent.innerHTML = `
+                        <div class="glass-card" style="text-align: center; padding: 60px 20px; border-radius: 16px;">
+                            <img src="/assets/icons/icon-child-profile.svg" style="width: 64px; height: 64px; opacity: 0.7; margin-bottom: 16px;" alt="Child">
+                            <h3 style="font-size: 22px; font-weight: 800; color: var(--text-primary); margin: 0 0 8px 0;">No Student Linked Yet</h3>
+                            <p style="margin: 0 auto 24px auto; color: var(--text-secondary); max-width: 480px; font-size: 14px; line-height: 1.6;">
+                                Enter your child's SmartSlate Student Code (e.g. <strong>STU-101</strong> or <strong>STU-VAMS1A-11</strong> or <strong>STU-DAYA5A-63</strong>) to view real-time exam marks, digital notes, search logs, and academic progress.
+                            </p>
+                            <button class="glass-btn glass-btn-primary bouncy-btn" id="btn-empty-connect-child" style="padding: 12px 24px; font-size: 15px; font-weight: 700;">
+                                <img src="/assets/icons/icon-add-account.svg" style="width: 18px; height: 18px; vertical-align: middle; margin-right: 6px;" alt="Connect">
+                                <span>Connect Child Account</span>
+                            </button>
+                        </div>
+                    `;
+                    tabContent.querySelector('#btn-empty-connect-child')?.addEventListener('click', () => this.showConnectChildModal());
+                }
+                return;
             }
 
-            console.log(`[Parent] Children rendered: ${fetchedChildren.length}`);
-            this.children = fetchedChildren;
+            // Select active child
+            if (!this.selectedChildId || !this.children.some(c => (c.uid == this.selectedChildId || c.student_id == this.selectedChildId || c.student_uid == this.selectedChildId))) {
+                this.selectedChildId = this.children[0].uid || this.children[0].student_id || this.children[0].student_uid;
+            }
+
+            this.renderChildrenSwitcher(container);
+            this.renderActiveChild(container);
+        } catch (error) {
+            console.error("[Parent] Firebase child loading error:", error);
+            if (switcher) {
+                switcher.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 10px; color: var(--status-danger); font-size: 13px; padding: 6px 0;">
+                        <span>Unable to load children. Please try again.</span>
+                        <button class="glass-btn glass-btn-secondary bouncy-btn" id="btn-retry-load-children" style="padding: 4px 12px; font-size: 12px; font-weight: 700;">
+                            🔄 Retry
+                        </button>
+                    </div>
+                `;
+                switcher.querySelector('#btn-retry-load-children')?.addEventListener('click', () => {
+                    this.loadChildren(container);
+                });
+            }
+        }
+    },
 
             if (!this.children.length) {
                 if (switcher) {
@@ -1356,29 +1295,16 @@ const ParentView = {
             submitBtn.innerHTML = 'Connecting...';
 
             try {
-                let linkedChild = null;
+                // Primary Backend API link (Server Firebase Admin creates connection document in Firestore)
+                const apiRes = await withTimeout(API.linkChild(studentCode), 10000, 'Link student timed out');
+                console.log("[ParentView] Link response:", apiRes);
 
-                // 1. Firebase direct cloud link
-                if (window.firebaseAuthService) {
-                    try {
-                        const fbRes = await window.firebaseAuthService.connectParentToStudent(parentUid, studentCode);
-                        if (fbRes?.child) linkedChild = fbRes.child;
-                    } catch (fbErr) {
-                        console.debug('[ParentView] Firebase connect note:', fbErr.message);
-                    }
+                if (!apiRes?.success) {
+                    throw new Error(apiRes?.error || 'Failed to connect student.');
                 }
 
-                // 2. Backend API link
-                try {
-                    const apiRes = await API.linkChild(studentCode);
-                    console.log("[ParentView] Link response:", apiRes);
-                    if (apiRes?.child) linkedChild = apiRes.child;
-                } catch (apiErr) {
-                    console.debug('[ParentView] API linkChild note:', apiErr.message);
-                    if (!linkedChild) throw apiErr;
-                }
-
-                if (linkedChild) {
+                if (apiRes?.child) {
+                    const linkedChild = apiRes.child;
                     const sid = String(linkedChild.uid || linkedChild.student_id || linkedChild.student_uid);
                     if (!this.children.some(c => (c.uid == sid || c.student_id == sid || c.student_uid == sid || c.student_code == linkedChild.student_code || c.studentCode == linkedChild.studentCode))) {
                         this.children.push(linkedChild);
