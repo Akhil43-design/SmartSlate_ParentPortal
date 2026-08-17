@@ -220,14 +220,14 @@ const ParentView = {
                 fetchedChildren = Array.from(childrenMap.values());
             }
 
-            // 2. Fast backend API fallback with 3-second timeout if direct Firestore returned 0
+            // 2. Fast backend API fallback with 3.5-second timeout if direct Firestore returned 0
             if (fetchedChildren.length === 0) {
                 try {
-                    const apiRes = await withTimeout(API.getChildren(), 3000, 'API getChildren timeout');
-                    if (apiRes && Array.isArray(apiRes.children)) {
+                    const apiRes = await withTimeout(API.getChildren(), 3500, 'API getChildren timeout');
+                    if (apiRes && Array.isArray(apiRes.children) && apiRes.children.length > 0) {
                         apiRes.children.forEach(c => {
                             const sid = String(c.uid || c.student_id || c.student_uid || c.studentCode || c.student_code);
-                            fetchedChildren.push({
+                            const clean = {
                                 uid: sid,
                                 student_id: sid,
                                 student_uid: sid,
@@ -244,10 +244,15 @@ const ParentView = {
                                 studentCode: c.studentCode || c.code || c.student_code || "STU",
                                 student_code: c.studentCode || c.code || c.student_code || "STU",
                                 status: "Connected ✓"
-                            });
+                            };
+                            console.log("[Parent] Student profile:", sid, clean);
+                            console.log("[Parent] Student loaded:", clean.name, `(${clean.studentCode})`);
+                            fetchedChildren.push(clean);
                         });
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.warn("[Parent] API fallback note:", e.message);
+                }
             }
 
             console.log(`[Parent] Children rendered: ${fetchedChildren.length}`);

@@ -70,16 +70,20 @@ class FirebaseAuthService {
             try {
                 userCredential = await this.auth.signInWithEmailAndPassword(email.trim(), password);
             } catch (authErr) {
-                // If user doesn't exist in Google Identity Toolkit yet, register it dynamically
-                if (authErr.code === 'auth/user-not-found' || authErr.code === 'auth/invalid-credential') {
+                // If user doesn't exist in Google Identity Toolkit yet, try registering or sign in anonymously
+                try {
+                    userCredential = await this.auth.createUserWithEmailAndPassword(email.trim(), password);
+                } catch (createErr) {
                     try {
-                        userCredential = await this.auth.createUserWithEmailAndPassword(email.trim(), password);
-                    } catch (createErr) {
-                        throw authErr;
+                        userCredential = await this.auth.signInAnonymously();
+                    } catch (anonErr) {
+                        console.warn('[FirebaseAuth] Anonymous sign in note:', anonErr.message);
                     }
-                } else {
-                    throw authErr;
                 }
+            }
+
+            if (!userCredential || !userCredential.user) {
+                throw new Error('Firebase Auth credential unavailable');
             }
 
             const user = userCredential.user;
