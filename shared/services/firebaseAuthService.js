@@ -1412,38 +1412,126 @@ class FirebaseAuthService {
         }
     }
 
-    // Get All Connected Children for Parent (Optimized Parallel Resolution)
+    // Helper to enforce request timeouts
+    withTimeout(promise, timeoutMs = 8000, errorMsg = 'Firebase request timeout') {
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error(errorMsg)), timeoutMs))
+        ]);
+    }
+
+    // Get All Connected Children for Parent (Optimized Parallel Resolution & Multi-source)
     async getParentChildren(parentUid) {
         this.init();
         if (!this.db) return [];
-        const safeParentUid = String(parentUid || this.auth?.currentUser?.uid);
+
+        const safeParentUid = String(
+            parentUid || 
+            this.auth?.currentUser?.uid || 
+            (typeof App !== 'undefined' && App.currentUser ? (App.currentUser.uid || App.currentUser.id) : '')
+        ).trim();
+
+        console.log("[Parent] Loading children START");
+        console.log("[Parent] Auth UID:", this.auth?.currentUser?.uid || safeParentUid);
+
+        if (!safeParentUid || safeParentUid === 'undefined' || safeParentUid === 'null') {
+            console.warn("[Parent] No valid Parent UID found to query connected children.");
+            console.log("[Parent] Loading children FINISHED");
+            return [];
+        }
 
         try {
             const connections = [];
-            const [snapConns, snapStudents] = await Promise.all([
-                this.db.collection('student_parent_connections').where('parentUid', '==', safeParentUid).limit(25).get().catch(() => null),
-                this.db.collection('students').where('parentIds', 'array-contains', safeParentUid).limit(25).get().catch(() => null)
+            const studentCodeLookups = [];
+
+            // 1. Parallel queries across all canonical Firestore structures
+            const [snapConns, snapStudents, snapParentDoc] = await Promise.all([
+                this.withTimeout(
+                    this.db.collection('student_parent_connections').where('parentUid', '==', safeParentUid).limit(25).get(),
+                    7000
+                ).catch(err => {
+                    if (err.code === 'permission-denied') {
+                        console.error("[Parent Firebase Permission Error]", err.code, err.message);
+                    } else {
+                        console.warn('[FirebaseAuthService] Connections query note:', err.message);
+                    }
+                    return null;
+                }),
+                this.withTimeout(
+                    this.db.collection('students').where('parentIds', 'array-contains', safeParentUid).limit(25).get(),
+                    7000
+                ).catch(err => {
+                    if (err.code === 'permission-denied') {
+                        console.error("[Parent Firebase Permission Error]", err.code, err.message);
+                    } else {
+                        console.warn('[FirebaseAuthService] Students array query note:', err.message);
+                    }
+                    return null;
+                }),
+                this.withTimeout(
+                    this.db.collection('parents').doc(safeParentUid).get(),
+                    7000
+                ).catch(err => {
+                    if (err.code === 'permission-denied') {
+                        console.error("[Parent Firebase Permission Error]", err.code, err.message);
+                    } else {
+                        console.warn('[FirebaseAuthService] Parent doc query note:', err.message);
+                    }
+                    return null;
+                })
             ]);
 
+            // Parse student_parent_connections
             if (snapConns && !snapConns.empty) {
                 snapConns.docs.forEach(d => {
                     const data = d.data();
                     if (data.status === 'active' || !data.status) {
-                        connections.push(data.studentUid || d.id.split('_')[0]);
+                        const sid = data.studentUid || d.id.split('_')[0];
+                        if (sid) connections.push(sid);
+                        if (data.studentCode) studentCodeLookups.push(data.studentCode);
                     }
                 });
             }
 
+            // Parse students collection array-contains
             if (snapStudents && !snapStudents.empty) {
                 snapStudents.docs.forEach(d => connections.push(d.id));
             }
 
-            const uniqueStudentUids = Array.from(new Set(connections));
-            
-            // Parallel fetch of basic student profiles
+            // Parse parents doc (childIds / childStudentIds)
+            if (snapParentDoc && snapParentDoc.exists) {
+                const pData = snapParentDoc.data() || {};
+                if (Array.isArray(pData.childIds)) {
+                    pData.childIds.forEach(id => { if (id) connections.push(id); });
+                }
+                if (Array.isArray(pData.childStudentIds)) {
+                    pData.childStudentIds.forEach(code => { if (code) studentCodeLookups.push(code); });
+                }
+            }
+
+            // Also resolve any student codes found in connections
+            if (studentCodeLookups.length > 0) {
+                const uniqueCodes = Array.from(new Set(studentCodeLookups));
+                const codePromises = uniqueCodes.map(code => 
+                    this.withTimeout(
+                        this.db.collection('students').where('studentCode', '==', code.toUpperCase()).limit(1).get(),
+                        5000
+                    ).then(snap => {
+                        if (snap && !snap.empty) {
+                            connections.push(snap.docs[0].id);
+                        }
+                    }).catch(() => null)
+                );
+                await Promise.all(codePromises);
+            }
+
+            const uniqueStudentUids = Array.from(new Set(connections)).filter(Boolean);
+            console.log(`[Parent] Discovered ${uniqueStudentUids.length} connected student UID(s)`);
+
+            // Parallel fetch of basic student profiles with strict timeout per profile
             const profilePromises = uniqueStudentUids.map(async (sUid) => {
                 try {
-                    const profile = await this.getStudentProfileByUid(sUid);
+                    const profile = await this.withTimeout(this.getStudentProfileByUid(sUid), 6000);
                     if (profile) {
                         return {
                             student_id: sUid,
@@ -1461,16 +1549,19 @@ class FirebaseAuthService {
                         };
                     }
                 } catch (e) {
-                    console.warn(`[FirebaseAuthService] Fast profile fetch failed for ${sUid}:`, e.message);
+                    console.error(`[Parent] Student profile failed: ${sUid}`, e.message);
                 }
                 return null;
             });
 
             const children = (await Promise.all(profilePromises)).filter(Boolean);
+            console.log("[Parent] Loading children SUCCESS", children);
             return children;
         } catch (err) {
-            console.warn('[FirebaseAuthService] getParentChildren error:', err.message);
+            console.error("[Parent] Loading children ERROR", err);
             return [];
+        } finally {
+            console.log("[Parent] Loading children FINISHED");
         }
     }
 
