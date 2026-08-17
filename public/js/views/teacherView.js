@@ -270,21 +270,29 @@ const TeacherView = {
 
     // 1. Color-Coded Student Table View
     async renderColorCodedStudentTable(container) {
-        if (this.currentClassId && this.currentClassId !== 'all') {
-            try {
-                const res = await API.getClassStudents(this.currentClassId);
-                this.students = res.students || [];
-            } catch (e) {
-                console.warn("[Teacher] Class student fetch note:", e.message);
+        console.log("[TEACHER UI] render START");
+        console.log("[TEACHER UI] rendering dashboard skeleton & loading students");
+        container.innerHTML = `<div style="text-align: center; padding: 40px;"><div class="spinner" style="margin: 0 auto;"></div></div>`;
+
+        try {
+            let res;
+            if (this.currentClassId && this.currentClassId !== 'all') {
+                console.log("[TEACHER UI] BEFORE getClassStudents:", this.currentClassId);
+                res = await API.getClassStudents(this.currentClassId);
+                console.log("[TEACHER UI] AFTER getClassStudents:", res);
+            } else {
+                console.log("[TEACHER UI] BEFORE getAllStudents (/api/teacher/students)");
+                res = await API.getAllStudents();
+                console.log("[TEACHER UI] AFTER getAllStudents:", res);
             }
-        } else if (!this.students || !this.students.length) {
-            try {
-                const res = await API.getAllStudents();
-                this.students = res.students || [];
-            } catch (e) {
-                console.warn("[Teacher] All students fetch note:", e.message);
-            }
+            this.students = res?.students || [];
+        } catch (e) {
+            console.error("[TEACHER UI] Student fetch error:", e);
+            this.students = [];
         }
+
+        console.log("[TEACHER UI] students count:", this.students.length);
+        console.log("[TEACHER UI] rendering students table");
 
         if (!this.students.length) {
             container.innerHTML = `
@@ -292,6 +300,7 @@ const TeacherView = {
                     <p>No students currently connected or enrolled.</p>
                 </div>
             `;
+            console.log("[TEACHER UI] render COMPLETE (empty roster)");
             return;
         }
 
@@ -360,6 +369,9 @@ const TeacherView = {
                                 </tr>
                             `;
                         }).join('')}
+                    </tbody>
+                </table>
+            </div>
         `;
 
         container.querySelectorAll('.btn-view-student').forEach(btn => {
@@ -369,6 +381,8 @@ const TeacherView = {
                 this.renderTabContent(container);
             });
         });
+
+        console.log("[TEACHER UI] render COMPLETE");
     },
 
     // 2. Full Student Detail Page
