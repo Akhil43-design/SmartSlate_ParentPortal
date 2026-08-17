@@ -27,39 +27,23 @@ app.use(express.urlencoded({ extended: true }));
 const publicPath = path.join(__dirname, '../public');
 app.use(express.static(publicPath));
 
-// API Routes for Parent & Teacher Portal
-app.use('/api/auth', authRoutes);
-app.use('/api/parent', parentRoutes);
-app.use('/api/teacher', teacherRoutes);
-app.use('/api/assignments', assignmentsRoutes);
-app.use('/api/exams', examsRoutes);
-app.use('/api/attendance', attendanceRoutes);
-app.use('/api/chat', chatRoutes);
-app.use('/api/notifications', notificationsRoutes);
+// API Routes for Parent & Teacher Portal (supporting both /api/ prefix and stripped routes)
+app.use(['/api/auth', '/auth'], authRoutes);
+app.use(['/api/parent', '/parent'], parentRoutes);
+app.use(['/api/teacher', '/teacher'], teacherRoutes);
+app.use(['/api/assignments', '/assignments'], assignmentsRoutes);
+app.use(['/api/exams', '/exams'], examsRoutes);
+app.use(['/api/attendance', '/attendance'], attendanceRoutes);
+app.use(['/api/chat', '/chat'], chatRoutes);
+app.use(['/api/notifications', '/notifications'], notificationsRoutes);
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', app: 'SmartSlate Parent & Teacher Portal (Vercel)', version: '1.0.0' });
+app.get(['/api/health', '/health'], (req, res) => {
+    res.json({ status: 'ok', app: 'SmartSlate Parent & Teacher Portal (Vercel)', version: '2.0.0' });
 });
 
 app.use(errorLogger);
 
-// Initialize DB on cold start
-let dbInitialized = false;
-async function ensureDb() {
-    if (!dbInitialized) {
-        try {
-            if (typeof initDb === 'function') await initDb();
-            if (typeof seed === 'function') await seed();
-            dbInitialized = true;
-        } catch (err) {
-            console.warn('[Vercel Serverless] DB init notice:', err.message);
-            dbInitialized = true;
-        }
-    }
-}
-
-module.exports = async (req, res) => {
-    await ensureDb();
+module.exports = (req, res) => {
     return app(req, res);
 };
