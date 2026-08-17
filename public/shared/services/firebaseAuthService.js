@@ -1412,7 +1412,7 @@ class FirebaseAuthService {
         }
     }
 
-    // Get All Connected Children for Parent
+    // Get All Connected Children for Parent (Optimized Parallel Resolution)
     async getParentChildren(parentUid) {
         this.init();
         if (!this.db) return [];
@@ -1420,9 +1420,13 @@ class FirebaseAuthService {
 
         try {
             const connections = [];
-            const snap = await this.db.collection('student_parent_connections').where('parentUid', '==', safeParentUid).get().catch(() => null);
-            if (snap && !snap.empty) {
-                snap.docs.forEach(d => {
+            const [snapConns, snapStudents] = await Promise.all([
+                this.db.collection('student_parent_connections').where('parentUid', '==', safeParentUid).limit(25).get().catch(() => null),
+                this.db.collection('students').where('parentIds', 'array-contains', safeParentUid).limit(25).get().catch(() => null)
+            ]);
+
+            if (snapConns && !snapConns.empty) {
+                snapConns.docs.forEach(d => {
                     const data = d.data();
                     if (data.status === 'active' || !data.status) {
                         connections.push(data.studentUid || d.id.split('_')[0]);
@@ -1430,39 +1434,49 @@ class FirebaseAuthService {
                 });
             }
 
-            const snapStudents = await this.db.collection('students').where('parentIds', 'array-contains', safeParentUid).get().catch(() => null);
             if (snapStudents && !snapStudents.empty) {
                 snapStudents.docs.forEach(d => connections.push(d.id));
             }
 
             const uniqueStudentUids = Array.from(new Set(connections));
-            const children = [];
-
-            for (const sUid of uniqueStudentUids) {
-                const profile = await this.getStudentProfile(sUid);
-                if (profile) {
-                    children.push({
-                        student_id: sUid,
-                        student_uid: sUid,
-                        uid: sUid,
-                        student_name: profile.name || 'Student',
-                        name: profile.name || 'Student',
-                        student_code: profile.studentCode || '',
-                        grade: profile.grade || profile.className || 'Grade 8',
-                        class_name: profile.grade || profile.className || 'Grade 8',
-                        section: profile.section || 'A',
-                        education_level: profile.educationLevel || 'High School',
-                        school_name: profile.schoolName || 'SmartSlate Academy',
-                        status: 'Connected ✓'
-                    });
+            
+            // Parallel fetch of basic student profiles
+            const profilePromises = uniqueStudentUids.map(async (sUid) => {
+                try {
+                    const profile = await this.getStudentProfileByUid(sUid);
+                    if (profile) {
+                        return {
+                            student_id: sUid,
+                            student_uid: sUid,
+                            uid: sUid,
+                            student_name: profile.name || profile.fullName || 'Student',
+                            name: profile.name || profile.fullName || 'Student',
+                            student_code: profile.studentCode || profile.studentId || '',
+                            grade: profile.grade || profile.className || 'Grade 8',
+                            class_name: profile.grade || profile.className || 'Grade 8',
+                            section: profile.section || 'A',
+                            education_level: profile.educationLevel || 'High School',
+                            school_name: profile.schoolName || 'SmartSlate Academy',
+                            status: 'Connected ✓'
+                        };
+                    }
+                } catch (e) {
+                    console.warn(`[FirebaseAuthService] Fast profile fetch failed for ${sUid}:`, e.message);
                 }
-            }
+                return null;
+            });
 
+            const children = (await Promise.all(profilePromises)).filter(Boolean);
             return children;
         } catch (err) {
             console.warn('[FirebaseAuthService] getParentChildren error:', err.message);
             return [];
         }
+    }
+
+    // Alias for getStudentProfile
+    async getStudentProfile(studentUid) {
+        return this.getStudentProfileByUid(studentUid);
     }
 
     // Get Student Digital Notes

@@ -1,5 +1,5 @@
 /* SmartSlate Parent Companion Portal View Component
- * Real-time Firebase & SQLite synchronized parent monitoring dashboard
+ * Optimized progressive child data loading with in-memory caching and real-time streams
  */
 
 const ParentView = {
@@ -8,6 +8,19 @@ const ParentView = {
     selectedChildId: null,
     searchUnsubscribe: null,
     parentProfile: null,
+    
+    // Short-lived in-memory cache
+    childCache: new Map(), // sid -> { overview, exams, notes, searches, assignments, attendance, loadedAt }
+    CACHE_TTL_MS: 60000,
+
+    // Diagnostic Request Metrics
+    metrics: {
+        connectedChildrenCount: 0,
+        profileRequests: 0,
+        notesRequests: 0,
+        examRequests: 0,
+        duplicateRequests: 0
+    },
 
     async render(container) {
         // Stop any previous Firestore snapshot listeners
@@ -19,6 +32,7 @@ const ParentView = {
         this.parentProfile = App.currentUser || { name: 'Parent', role: 'parent' };
         const parentName = this.parentProfile.name || 'Parent';
 
+        // STEP 1 — Render the parent dashboard shell immediately
         container.innerHTML = `
             <div class="parent-dashboard-wrapper" style="max-width: 1200px; margin: 0 auto; padding-bottom: 40px;">
                 <!-- Header -->
@@ -49,7 +63,7 @@ const ParentView = {
                         <div id="active-child-status-badge"></div>
                     </div>
                     <div id="parent-children-switcher-container" style="display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px;">
-                        <div style="color: var(--text-muted); font-size: 14px; padding: 8px 0;">Loading connected children...</div>
+                        <div style="color: var(--text-muted); font-size: 14px; padding: 8px 0;">Loading children...</div>
                     </div>
                 </div>
 
@@ -85,52 +99,74 @@ const ParentView = {
 
                 <!-- Main Content Area -->
                 <div id="parent-active-tab-content">
-                    <div style="text-align: center; padding: 60px 20px;">
-                        <div class="spinner" style="margin: 0 auto 16px auto;"></div>
-                        <p style="color: var(--text-muted); font-size: 14px;">Loading real-time student data...</p>
+                    <div style="text-align: center; padding: 40px 20px;">
+                        <div class="spinner" style="margin: 0 auto 12px auto;"></div>
+                        <p style="color: var(--text-muted); font-size: 13px;">Loading progress...</p>
                     </div>
                 </div>
             </div>
         `;
 
-        await this.loadChildren(container);
         this.bindEvents(container);
+
+        // STEP 2 — Fetch ONLY connected children records first
+        await this.loadChildren(container);
     },
 
     async loadChildren(container) {
+        console.time("[Parent] Connected children");
+        console.time("[Parent] Child profiles");
+
         try {
             let fetchedChildren = [];
             
-            // 1. Fetch from backend API (SQLite cache + linked records)
-            try {
-                const data = await API.getChildren();
-                fetchedChildren = data.children || [];
-            } catch (apiErr) {
-                console.warn('[ParentView] API.getChildren fallback:', apiErr.message);
+            // 1. Parallel fetch from backend API and Firebase Client Service
+            const promises = [
+                API.getChildren().catch(e => {
+                    console.debug('[ParentView] API getChildren note:', e.message);
+                    return { children: [] };
+                })
+            ];
+
+            if (window.firebaseAuthService?.auth?.currentUser) {
+                promises.push(
+                    window.firebaseAuthService.getParentChildren(window.firebaseAuthService.auth.currentUser.uid).catch(e => {
+                        console.debug('[ParentView] Firebase getParentChildren note:', e.message);
+                        return [];
+                    })
+                );
             }
 
-            // 2. Supplement from Firebase Auth Service if available online
-            if (window.firebaseAuthService?.auth?.currentUser) {
-                try {
-                    const fbChildren = await window.firebaseAuthService.getParentChildren(window.firebaseAuthService.auth.currentUser.uid);
-                    if (fbChildren && fbChildren.length > 0) {
-                        const map = new Map();
-                        fetchedChildren.forEach(c => map.set(String(c.student_id || c.student_uid), c));
-                        fbChildren.forEach(c => {
-                            const sid = String(c.student_id || c.student_uid);
-                            if (!map.has(sid)) {
-                                map.set(sid, c);
-                            } else {
-                                const exist = map.get(sid);
-                                map.set(sid, { ...exist, ...c });
-                            }
-                        });
-                        fetchedChildren = Array.from(map.values());
+            const [apiRes, fbChildren] = await Promise.all(promises);
+            const apiChildren = apiRes?.children || [];
+            
+            const map = new Map();
+            apiChildren.forEach(c => map.set(String(c.student_id || c.student_uid), c));
+            
+            if (Array.isArray(fbChildren)) {
+                fbChildren.forEach(c => {
+                    const sid = String(c.student_id || c.student_uid);
+                    if (!map.has(sid)) {
+                        map.set(sid, c);
+                    } else {
+                        const exist = map.get(sid);
+                        map.set(sid, { ...exist, ...c });
                     }
-                } catch (fbErr) {
-                    console.debug('[ParentView] Firebase children lookup note:', fbErr.message);
-                }
+                });
             }
+
+            fetchedChildren = Array.from(map.values());
+            this.metrics.profileRequests += fetchedChildren.length;
+            this.metrics.connectedChildrenCount = fetchedChildren.length;
+
+            console.timeEnd("[Parent] Connected children");
+            console.timeEnd("[Parent] Child profiles");
+
+            console.log(`[Parent] Connected children count: ${fetchedChildren.length}`);
+            console.log(`[Parent] Profile requests: ${this.metrics.profileRequests}`);
+            console.log(`[Parent] Notes requests: ${this.metrics.notesRequests}`);
+            console.log(`[Parent] Exam requests: ${this.metrics.examRequests}`);
+            console.log(`[Parent] Duplicate requests: ${this.metrics.duplicateRequests}`);
 
             this.children = fetchedChildren;
             const switcher = container.querySelector('#parent-children-switcher-container');
@@ -158,16 +194,19 @@ const ParentView = {
                 return;
             }
 
-            // Ensure valid selected child
+            // Select first child if none selected
             if (!this.selectedChildId || !this.children.some(c => (c.student_id == this.selectedChildId || c.student_uid == this.selectedChildId))) {
                 this.selectedChildId = this.children[0].student_id || this.children[0].student_uid;
             }
 
+            // Render Child Cards immediately without waiting for detailed data
             this.renderChildrenSwitcher(container);
             await this.renderActiveChild(container);
         } catch (err) {
             console.error('[ParentView] Error loading children:', err);
-            App.toast('Error loading connected children: ' + err.message, 'danger');
+            container.querySelector('#parent-children-switcher-container').innerHTML = `
+                <div style="color: var(--status-danger); font-size: 13px;">Error loading children. <a href="#" onclick="ParentView.loadChildren(document.querySelector('.parent-dashboard-wrapper')); return false;">Retry</a></div>
+            `;
         }
     },
 
@@ -203,7 +242,7 @@ const ParentView = {
                                 ${c.student_name || c.name}
                             </div>
                             <div style="font-size: 12px; opacity: ${isSelected ? '0.9' : '0.7'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                ${gradeDisplay} ${sectionDisplay}
+                                ${gradeDisplay} ${sectionDisplay} • <strong>${c.student_code || 'STU'}</strong>
                             </div>
                         </div>
                     </div>
@@ -238,28 +277,23 @@ const ParentView = {
             `;
         }
 
-        // Fetch child overview stats
-        let overview = null;
-        try {
-            const sid = activeChild.student_id || activeChild.student_uid;
-            overview = await API.getChildOverview(sid);
-        } catch (e) {
-            console.debug('[ParentView] Overview API fallback:', e.message);
-        }
-
-        const student = overview?.student || activeChild;
-        const kpis = overview?.kpis || {
-            overallProgress: 84,
-            examAverage: 86,
-            examsCompleted: 4,
-            assignmentsCompleted: 6,
-            totalAssignments: 8,
-            attendancePercentage: 93.3,
-            notebooksCount: 6,
-            searchesCount: 12
-        };
-
+        const sid = activeChild.student_id || activeChild.student_uid;
+        const cached = this.childCache.get(sid);
+        
+        // Immediate render with available profile info
         if (heroCard) {
+            const student = cached?.overview?.student || activeChild;
+            const kpis = cached?.overview?.kpis || {
+                overallProgress: 84,
+                examAverage: 86,
+                examsCompleted: 4,
+                assignmentsCompleted: 6,
+                totalAssignments: 8,
+                attendancePercentage: 93.3,
+                notebooksCount: 6,
+                searchesCount: 12
+            };
+
             heroCard.style.display = 'block';
             heroCard.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; border-bottom: 1px solid rgba(0,0,0,0.06); padding-bottom: 16px; margin-bottom: 16px;">
@@ -311,6 +345,7 @@ const ParentView = {
             `;
         }
 
+        // STEP 3 — Load Detailed Data for Active Tab
         await this.renderActiveTabContent(container.querySelector('#parent-active-tab-content'));
     },
 
@@ -334,14 +369,24 @@ const ParentView = {
     async renderActiveTabContent(contentArea) {
         if (!this.selectedChildId) return;
 
+        const loadingLabels = {
+            overview: 'Loading progress...',
+            exams: 'Loading results...',
+            notes: 'Loading notes...',
+            searches: 'Loading search history...',
+            assignments: 'Loading assignments...',
+            attendance: 'Loading attendance...',
+            announcements: 'Loading announcements...'
+        };
+
         contentArea.innerHTML = `
             <div style="text-align: center; padding: 40px 20px;">
                 <div class="spinner" style="margin: 0 auto 12px auto;"></div>
-                <p style="color: var(--text-muted); font-size: 13px;">Loading section details...</p>
+                <p style="color: var(--text-muted); font-size: 13px;">${loadingLabels[this.activeTab] || 'Loading details...'}</p>
             </div>
         `;
 
-        // Clear any active real-time Firestore listeners if leaving searches tab
+        // Clean up any previous Firestore snapshot listener
         if (this.activeTab !== 'searches' && this.searchUnsubscribe) {
             this.searchUnsubscribe();
             this.searchUnsubscribe = null;
@@ -387,11 +432,132 @@ const ParentView = {
     },
 
     // -------------------------------------------------------------
+    // PROGRESSIVE CACHED DATA LOADER WITH PARALLEL REQUESTS
+    // -------------------------------------------------------------
+    async getChildData(sid, type) {
+        const now = Date.now();
+        let cached = this.childCache.get(sid);
+        if (!cached) {
+            cached = { loadedAt: {} };
+            this.childCache.set(sid, cached);
+        }
+
+        // Cache hit (TTL check)
+        if (cached[type] && cached.loadedAt[type] && (now - cached.loadedAt[type] < this.CACHE_TTL_MS)) {
+            this.metrics.duplicateRequests++;
+            this.refreshChildDataInBackground(sid, type);
+            return cached[type];
+        }
+
+        console.time("[Parent] Child details");
+        let result = null;
+
+        if (type === 'overview') {
+            this.metrics.profileRequests++;
+            result = await API.getChildOverview(sid).catch(() => ({}));
+        } else if (type === 'exams') {
+            this.metrics.examRequests++;
+            const apiData = await API.getChildExams(sid).catch(() => ({ exams: [] }));
+            let exams = apiData.exams || [];
+            if (window.firebaseAuthService) {
+                try {
+                    const fbExams = await window.firebaseAuthService.getStudentExamSubmissions(sid);
+                    if (fbExams && fbExams.length > 0) {
+                        const map = new Map();
+                        exams.forEach(ex => map.set(String(ex.examId || ex.id), ex));
+                        fbExams.forEach(ex => {
+                            const k = String(ex.examId || ex.id);
+                            map.set(k, {
+                                ...map.get(k),
+                                ...ex,
+                                title: ex.examTitle || ex.title,
+                                isEvaluated: ex.status === 'evaluated' || ex.status === 'graded',
+                                score: ex.score,
+                                totalMarks: ex.totalMarks || 100,
+                                percentage: ex.score !== null ? Math.round((ex.score / (ex.totalMarks || 100)) * 100) : null
+                            });
+                        });
+                        exams = Array.from(map.values());
+                    }
+                } catch (e) {}
+            }
+            result = exams;
+        } else if (type === 'notes') {
+            this.metrics.notesRequests++;
+            const apiData = await API.getChildNotes(sid).catch(() => ({ notes: [] }));
+            let notes = apiData.notes || [];
+            if (window.firebaseAuthService) {
+                try {
+                    const fbNotes = await window.firebaseAuthService.getStudentNotes(sid);
+                    if (fbNotes && fbNotes.length > 0) {
+                        const map = new Map();
+                        notes.forEach(n => map.set(String(n.id), n));
+                        fbNotes.forEach(n => map.set(String(n.id), { ...map.get(String(n.id)), ...n }));
+                        notes = Array.from(map.values());
+                    }
+                } catch (e) {}
+            }
+            result = notes;
+        } else if (type === 'searches') {
+            const apiData = await API.getChildSearches(sid).catch(() => ({ activity: [] }));
+            result = apiData.activity || apiData.searches || [];
+        } else if (type === 'assignments') {
+            const apiData = await API.getChildAssignments(sid).catch(() => ({ assignments: [] }));
+            result = apiData.assignments || [];
+        } else if (type === 'attendance') {
+            const apiData = await API.getChildAttendance(sid).catch(() => ({ records: [], attendancePercentage: 93.3 }));
+            result = apiData;
+        } else if (type === 'announcements') {
+            const apiData = await API.getChildAnnouncements(sid).catch(() => ({ announcements: [] }));
+            result = apiData.announcements || [];
+        }
+
+        cached[type] = result;
+        cached.loadedAt[type] = Date.now();
+        console.timeEnd("[Parent] Child details");
+        return result;
+    },
+
+    async refreshChildDataInBackground(sid, type) {
+        try {
+            let result = null;
+            if (type === 'overview') {
+                result = await API.getChildOverview(sid).catch(() => null);
+            } else if (type === 'exams') {
+                const apiData = await API.getChildExams(sid).catch(() => null);
+                result = apiData?.exams || null;
+            } else if (type === 'notes') {
+                const apiData = await API.getChildNotes(sid).catch(() => null);
+                result = apiData?.notes || null;
+            } else if (type === 'searches') {
+                const apiData = await API.getChildSearches(sid).catch(() => null);
+                result = apiData?.activity || apiData?.searches || null;
+            } else if (type === 'assignments') {
+                const apiData = await API.getChildAssignments(sid).catch(() => null);
+                result = apiData?.assignments || null;
+            } else if (type === 'attendance') {
+                result = await API.getChildAttendance(sid).catch(() => null);
+            } else if (type === 'announcements') {
+                const apiData = await API.getChildAnnouncements(sid).catch(() => null);
+                result = apiData?.announcements || null;
+            }
+
+            if (result) {
+                let cached = this.childCache.get(sid);
+                if (cached) {
+                    cached[type] = result;
+                    cached.loadedAt[type] = Date.now();
+                }
+            }
+        } catch (e) {}
+    },
+
+    // -------------------------------------------------------------
     // TAB 1: OVERVIEW & PROGRESS
     // -------------------------------------------------------------
     async renderOverviewTab(container) {
         const sid = this.selectedChildId;
-        const res = await API.getChildOverview(sid).catch(() => ({}));
+        const res = await this.getChildData(sid, 'overview');
         const student = res.student || {};
         const kpis = res.kpis || { overallProgress: 84, attendancePercentage: 93.3, examAverage: 86, examsCompleted: 4, assignmentsCompleted: 6, totalAssignments: 8 };
 
@@ -468,41 +634,7 @@ const ParentView = {
     // -------------------------------------------------------------
     async renderExamsTab(container) {
         const sid = this.selectedChildId;
-        let exams = [];
-
-        // 1. Backend SQLite/Sync API
-        try {
-            const data = await API.getChildExams(sid);
-            exams = data.exams || [];
-        } catch (e) {
-            console.debug('[ParentView] API exams error:', e.message);
-        }
-
-        // 2. Supplement from Cloud Firestore if available
-        if (window.firebaseAuthService) {
-            try {
-                const fbExams = await window.firebaseAuthService.getStudentExamSubmissions(sid);
-                if (fbExams && fbExams.length > 0) {
-                    const map = new Map();
-                    exams.forEach(ex => map.set(String(ex.examId || ex.id), ex));
-                    fbExams.forEach(ex => {
-                        const k = String(ex.examId || ex.id);
-                        map.set(k, {
-                            ...map.get(k),
-                            ...ex,
-                            title: ex.examTitle || ex.title,
-                            isEvaluated: ex.status === 'evaluated' || ex.status === 'graded',
-                            score: ex.score,
-                            totalMarks: ex.totalMarks || 100,
-                            percentage: ex.score !== null ? Math.round((ex.score / (ex.totalMarks || 100)) * 100) : null
-                        });
-                    });
-                    exams = Array.from(map.values());
-                }
-            } catch (fbErr) {
-                console.debug('[ParentView] Firebase exams fetch note:', fbErr.message);
-            }
-        }
+        const exams = await this.getChildData(sid, 'exams');
 
         if (!exams.length) {
             container.innerHTML = `
@@ -540,7 +672,7 @@ const ParentView = {
                                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
                                     <div>
                                         <div style="font-size: 12px; font-weight: 700; color: var(--accent-primary); text-transform: uppercase;">
-                                            📘 ${ex.subject || 'General'}
+                                             📘 ${ex.subject || 'General'}
                                         </div>
                                         <h4 style="font-size: 17px; font-weight: 800; color: var(--text-primary); margin: 4px 0 0 0;">
                                             ${ex.title || ex.examTitle || 'Unit Examination'}
@@ -587,28 +719,7 @@ const ParentView = {
     // -------------------------------------------------------------
     async renderNotesTab(container) {
         const sid = this.selectedChildId;
-        let notes = [];
-
-        try {
-            const data = await API.getChildNotes(sid);
-            notes = data.notes || [];
-        } catch (e) {
-            console.debug('[ParentView] API notes fetch note:', e.message);
-        }
-
-        if (window.firebaseAuthService) {
-            try {
-                const fbNotes = await window.firebaseAuthService.getStudentNotes(sid);
-                if (fbNotes && fbNotes.length > 0) {
-                    const map = new Map();
-                    notes.forEach(n => map.set(String(n.id), n));
-                    fbNotes.forEach(n => map.set(String(n.id), { ...map.get(String(n.id)), ...n }));
-                    notes = Array.from(map.values());
-                }
-            } catch (fbErr) {
-                console.debug('[ParentView] Firebase notes fetch note:', fbErr.message);
-            }
-        }
+        const notes = await this.getChildData(sid, 'notes');
 
         if (!notes.length) {
             container.innerHTML = `
@@ -860,19 +971,20 @@ const ParentView = {
             }).join('');
         };
 
-        // 1. Initial Load from Backend SQLite API
-        try {
-            const data = await API.getChildSearches(sid);
-            renderSearchItems(data.activity || data.searches || []);
-        } catch (e) {
-            console.debug('[ParentView] Search log fetch note:', e.message);
-        }
+        // 1. Initial Load from Cached Data Manager
+        const cachedSearches = await this.getChildData(sid, 'searches');
+        renderSearchItems(cachedSearches);
 
-        // 2. Attach Real-time Firestore snapshot listener
+        // 2. Attach Real-time Firestore snapshot listener for live query stream
         if (window.firebaseAuthService) {
             const studentUid = activeChild.student_uid || sid;
             this.searchUnsubscribe = window.firebaseAuthService.listenToStudentSearchHistory(studentUid, (fbSearches) => {
                 if (fbSearches && fbSearches.length > 0) {
+                    let cached = this.childCache.get(sid);
+                    if (cached) {
+                        cached['searches'] = fbSearches;
+                        cached.loadedAt['searches'] = Date.now();
+                    }
                     renderSearchItems(fbSearches);
                 }
             });
@@ -884,14 +996,7 @@ const ParentView = {
     // -------------------------------------------------------------
     async renderAssignmentsTab(container) {
         const sid = this.selectedChildId;
-        let assignments = [];
-
-        try {
-            const data = await API.getChildAssignments(sid);
-            assignments = data.assignments || [];
-        } catch (e) {
-            console.debug('[ParentView] Assignments fetch note:', e.message);
-        }
+        const assignments = await this.getChildData(sid, 'assignments');
 
         if (!assignments.length) {
             container.innerHTML = `
@@ -936,14 +1041,8 @@ const ParentView = {
     // -------------------------------------------------------------
     async renderAttendanceTab(container) {
         const sid = this.selectedChildId;
-        let att = { presentDays: 42, absentDays: 3, totalDays: 45, percentage: 93.3, records: [] };
-
-        try {
-            const data = await API.getChildAttendance(sid);
-            if (data) att = { ...att, ...data };
-        } catch (e) {
-            console.debug('[ParentView] Attendance fetch note:', e.message);
-        }
+        const attData = await this.getChildData(sid, 'attendance');
+        const att = { presentDays: 42, absentDays: 3, totalDays: 45, percentage: 93.3, ...(attData || {}) };
 
         container.innerHTML = `
             <div class="glass-card" style="padding: 24px; background: #FFFFFF; border-radius: 14px;">
@@ -978,14 +1077,7 @@ const ParentView = {
     // -------------------------------------------------------------
     async renderAnnouncementsTab(container) {
         const sid = this.selectedChildId;
-        let notices = [];
-
-        try {
-            const data = await API.getChildAnnouncements(sid);
-            notices = data.announcements || [];
-        } catch (e) {
-            console.debug('[ParentView] Announcements fetch note:', e.message);
-        }
+        const notices = await this.getChildData(sid, 'announcements');
 
         if (!notices.length) {
             container.innerHTML = `
