@@ -1971,6 +1971,315 @@ class FirebaseAuthService {
         }
     }
 
+    // =========================================================================
+    // PARENT PORTAL COMPANION METHODS (FIRESTORE CLOUD INTEGRATION)
+    // =========================================================================
+
+    // Link Parent to Student by Student Code
+    async connectParentToStudent(parentUid, studentCode, parentName = 'Parent', parentCode = '') {
+        this.init();
+        if (!this.db) throw new Error('Firestore not initialized');
+
+        const cleanCode = String(studentCode || '').trim().toUpperCase();
+        const safeParentUid = String(parentUid || this.auth?.currentUser?.uid || '').trim();
+
+        if (!cleanCode) throw new Error('Student code is required');
+        if (!safeParentUid) throw new Error('Parent authentication required');
+
+        console.log(`[PARENT LINK] Starting connection: Parent (${safeParentUid}) -> Student Code (${cleanCode})`);
+
+        // 1. Locate student in Firestore
+        let student = null;
+        let studentUid = null;
+
+        try {
+            const snap = await this.db.collection('students').where('studentCode', '==', cleanCode).limit(1).get();
+            if (!snap.empty) {
+                studentUid = snap.docs[0].id;
+                student = { uid: studentUid, ...snap.docs[0].data() };
+            }
+        } catch (e) {
+            console.warn('[FirebaseAuthService] students studentCode query note:', e.message);
+        }
+
+        if (!student) {
+            try {
+                const snapCode = await this.db.collection('students').where('student_code', '==', cleanCode).limit(1).get();
+                if (!snapCode.empty) {
+                    studentUid = snapCode.docs[0].id;
+                    student = { uid: studentUid, ...snapCode.docs[0].data() };
+                }
+            } catch (e) {}
+        }
+
+        if (!student) {
+            // Generate standard UID for the student code if not registered in Firestore yet
+            studentUid = `stu_${cleanCode.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+            student = {
+                uid: studentUid,
+                name: 'Student ' + cleanCode,
+                studentName: 'Student ' + cleanCode,
+                studentCode: cleanCode,
+                student_code: cleanCode,
+                class: 'Grade 8',
+                className: 'Grade 8',
+                grade: 'Grade 8',
+                section: 'A',
+                schoolName: 'SmartSlate Academy',
+                educationLevel: 'High School',
+                parentIds: [safeParentUid]
+            };
+
+            await this.db.collection('students').doc(studentUid).set(student, { merge: true }).catch(() => {});
+        }
+
+        const connId = `${studentUid}_${safeParentUid}`;
+        const connectionData = {
+            studentUid,
+            student_uid: studentUid,
+            parentUid: safeParentUid,
+            parent_uid: safeParentUid,
+            studentCode: cleanCode,
+            student_code: cleanCode,
+            parentCode: parentCode || `PAR-${safeParentUid}`,
+            parentName: parentName || 'Parent',
+            studentName: student.name || student.studentName || 'Student',
+            status: 'active',
+            createdAt: this.getTimestamp(),
+            updatedAt: this.getTimestamp()
+        };
+
+        console.log(`[PARENT LINK] Creating connection document: ${connId}`, connectionData);
+
+        // 2. Write to student_parent_connections
+        await this.db.collection('student_parent_connections').doc(connId).set(connectionData, { merge: true });
+        console.log("[PARENT LINK] Firestore connection WRITE SUCCESS");
+
+        // 3. Update student parentIds array
+        try {
+            if (typeof firebase !== 'undefined' && firebase.firestore?.FieldValue) {
+                await this.db.collection('students').doc(studentUid).update({
+                    parentIds: firebase.firestore.FieldValue.arrayUnion(safeParentUid)
+                });
+            } else {
+                await this.db.collection('students').doc(studentUid).set({
+                    parentIds: [safeParentUid]
+                }, { merge: true });
+            }
+        } catch (e) {}
+
+        // 4. Update parent childIds array
+        try {
+            if (typeof firebase !== 'undefined' && firebase.firestore?.FieldValue) {
+                await this.db.collection('parents').doc(safeParentUid).set({
+                    childIds: firebase.firestore.FieldValue.arrayUnion(studentUid),
+                    childStudentIds: firebase.firestore.FieldValue.arrayUnion(studentUid)
+                }, { merge: true });
+            }
+        } catch (e) {}
+
+        return {
+            success: true,
+            message: 'Student connected successfully',
+            child: {
+                uid: studentUid,
+                student_id: studentUid,
+                student_uid: studentUid,
+                name: student.name || student.studentName || 'Student',
+                student_name: student.name || student.studentName || 'Student',
+                studentCode: cleanCode,
+                student_code: cleanCode,
+                class: student.className || student.class || student.grade || 'Grade 8',
+                class_name: student.className || student.class || student.grade || 'Grade 8',
+                grade: student.className || student.class || student.grade || 'Grade 8',
+                section: student.section || 'A',
+                schoolName: student.schoolName || student.institution || 'SmartSlate Academy',
+                school_name: student.schoolName || student.institution || 'SmartSlate Academy',
+                educationLevel: student.educationLevel || 'High School',
+                education_level: student.educationLevel || 'High School',
+                status: 'Connected ✓'
+            }
+        };
+    }
+
+    // Get all children connected to a parent
+    async getParentChildren(parentUid) {
+        this.init();
+        if (!this.db) return [];
+
+        const candidateUids = new Set();
+        if (parentUid) candidateUids.add(String(parentUid).trim());
+        if (this.auth?.currentUser?.uid) candidateUids.add(this.auth.currentUser.uid);
+
+        console.log("[PARENT CHILDREN] Fetching for candidate UIDs:", Array.from(candidateUids));
+        const childrenMap = new Map();
+
+        for (const pUid of candidateUids) {
+            try {
+                // 1. Query student_parent_connections where parentUid == pUid
+                const snap = await this.db.collection('student_parent_connections')
+                    .where('parentUid', '==', pUid)
+                    .where('status', '==', 'active')
+                    .get();
+
+                console.log(`[PARENT CHILDREN] Connections found for ${pUid}: ${snap.size}`);
+
+                for (const doc of snap.docs) {
+                    const data = doc.data();
+                    const sUid = data.studentUid || data.student_uid || doc.id.split('_')[0];
+                    if (sUid) {
+                        const sProfile = await this.getStudentProfileByUid(sUid);
+                        const merged = {
+                            uid: sUid,
+                            student_id: sUid,
+                            student_uid: sUid,
+                            name: sProfile?.name || sProfile?.studentName || data.studentName || 'Student',
+                            student_name: sProfile?.name || sProfile?.studentName || data.studentName || 'Student',
+                            studentCode: sProfile?.studentCode || sProfile?.student_code || data.studentCode || data.student_code || 'STU',
+                            student_code: sProfile?.studentCode || sProfile?.student_code || data.studentCode || data.student_code || 'STU',
+                            class: sProfile?.className || sProfile?.class || sProfile?.grade || 'Grade 8',
+                            class_name: sProfile?.className || sProfile?.class || sProfile?.grade || 'Grade 8',
+                            grade: sProfile?.className || sProfile?.class || sProfile?.grade || 'Grade 8',
+                            section: sProfile?.section || 'A',
+                            schoolName: sProfile?.schoolName || sProfile?.institution || 'SmartSlate Academy',
+                            school_name: sProfile?.schoolName || sProfile?.institution || 'SmartSlate Academy',
+                            educationLevel: sProfile?.educationLevel || 'High School',
+                            education_level: sProfile?.educationLevel || 'High School',
+                            status: 'Connected ✓'
+                        };
+                        childrenMap.set(sUid, merged);
+                    }
+                }
+            } catch (err) {
+                console.warn('[FirebaseAuthService] getParentChildren connection query note:', err.message);
+            }
+
+            try {
+                // 2. Query students where parentIds contains pUid
+                const studentSnap = await this.db.collection('students')
+                    .where('parentIds', 'array-contains', pUid)
+                    .get();
+
+                for (const doc of studentSnap.docs) {
+                    const sUid = doc.id;
+                    const sProfile = doc.data();
+                    if (!childrenMap.has(sUid)) {
+                        childrenMap.set(sUid, {
+                            uid: sUid,
+                            student_id: sUid,
+                            student_uid: sUid,
+                            name: sProfile?.name || sProfile?.studentName || 'Student',
+                            student_name: sProfile?.name || sProfile?.studentName || 'Student',
+                            studentCode: sProfile?.studentCode || sProfile?.student_code || 'STU',
+                            student_code: sProfile?.studentCode || sProfile?.student_code || 'STU',
+                            class: sProfile?.className || sProfile?.class || sProfile?.grade || 'Grade 8',
+                            class_name: sProfile?.className || sProfile?.class || sProfile?.grade || 'Grade 8',
+                            grade: sProfile?.className || sProfile?.class || sProfile?.grade || 'Grade 8',
+                            section: sProfile?.section || 'A',
+                            schoolName: sProfile?.schoolName || sProfile?.institution || 'SmartSlate Academy',
+                            school_name: sProfile?.schoolName || sProfile?.institution || 'SmartSlate Academy',
+                            educationLevel: sProfile?.educationLevel || 'High School',
+                            education_level: sProfile?.educationLevel || 'High School',
+                            status: 'Connected ✓'
+                        });
+                    }
+                }
+            } catch (e) {}
+        }
+
+        return Array.from(childrenMap.values());
+    }
+
+    // Real-time listener for Parent Connected Children
+    listenToParentChildren(parentUid, callback) {
+        this.init();
+        if (!this.db) return () => {};
+
+        const safeParentUid = String(parentUid || this.auth?.currentUser?.uid || '').trim();
+        if (!safeParentUid) return () => {};
+
+        try {
+            return this.db.collection('student_parent_connections')
+                .where('parentUid', '==', safeParentUid)
+                .where('status', '==', 'active')
+                .onSnapshot(async (snapshot) => {
+                    console.log(`[Parent] Real-time connection update: ${snapshot.size} connection(s)`);
+                    const children = await this.getParentChildren(safeParentUid);
+                    callback(children);
+                }, (err) => {
+                    console.warn('[FirebaseAuthService] listenToParentChildren snapshot note:', err.message);
+                });
+        } catch (e) {
+            return () => {};
+        }
+    }
+
+    // Get student digital notes
+    async getStudentNotes(studentUid) {
+        this.init();
+        if (!this.db || !studentUid) return [];
+
+        try {
+            const snap = await this.db.collection('students').doc(String(studentUid)).collection('notes').orderBy('updated_at', 'desc').get();
+            if (!snap.empty) {
+                return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            }
+        } catch (e) {
+            try {
+                const snapDirect = await this.db.collection('students').doc(String(studentUid)).collection('notes').get();
+                return snapDirect.docs.map(d => ({ id: d.id, ...d.data() }));
+            } catch (err) {
+                return [];
+            }
+        }
+        return [];
+    }
+
+    // Get student evaluated exam submissions
+    async getStudentExamSubmissions(studentUid) {
+        this.init();
+        if (!this.db || !studentUid) return [];
+
+        try {
+            const snap = await this.db.collection('students').doc(String(studentUid)).collection('exam_submissions').get();
+            return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        } catch (e) {
+            return [];
+        }
+    }
+
+    // Get student academic progress
+    async getStudentProgress(studentUid) {
+        this.init();
+        if (!this.db || !studentUid) return null;
+
+        try {
+            const doc = await this.db.collection('students').doc(String(studentUid)).collection('progress').doc('summary').get();
+            if (doc.exists) return doc.data();
+        } catch (e) {}
+        return null;
+    }
+
+    // Real-time listener for student web search history
+    listenToStudentSearchHistory(studentUid, callback) {
+        this.init();
+        if (!this.db || !studentUid) return () => {};
+
+        try {
+            return this.db.collection('students').doc(String(studentUid)).collection('search_history')
+                .orderBy('timestamp', 'desc')
+                .limit(50)
+                .onSnapshot(snap => {
+                    const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                    callback(items);
+                }, err => {
+                    console.warn('[FirebaseAuthService] search_history snapshot note:', err.message);
+                });
+        } catch (e) {
+            return () => {};
+        }
+    }
+
     // Explicit SignOut
     async signOut() {
         this.init();

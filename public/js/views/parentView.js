@@ -170,11 +170,14 @@ const ParentView = {
             const apiChildren = apiRes?.children || [];
             
             const map = new Map();
-            apiChildren.forEach(c => map.set(String(c.student_id || c.student_uid), c));
+            apiChildren.forEach(c => {
+                const sid = String(c.uid || c.student_id || c.student_uid || c.studentCode || c.student_code);
+                map.set(sid, c);
+            });
             
             if (Array.isArray(fbChildren)) {
                 fbChildren.forEach(c => {
-                    const sid = String(c.student_id || c.student_uid);
+                    const sid = String(c.uid || c.student_id || c.student_uid || c.studentCode || c.student_code);
                     if (!map.has(sid)) {
                         map.set(sid, c);
                     } else {
@@ -211,7 +214,7 @@ const ParentView = {
                         <img src="/assets/icons/icon-child-profile.svg" style="width: 64px; height: 64px; opacity: 0.7; margin-bottom: 16px;" alt="Child">
                         <h3 style="font-size: 22px; font-weight: 800; color: var(--text-primary); margin: 0 0 8px 0;">No Student Linked Yet</h3>
                         <p style="margin: 0 auto 24px auto; color: var(--text-secondary); max-width: 480px; font-size: 14px; line-height: 1.6;">
-                            Enter your child's SmartSlate Student Code (e.g. <strong>STU-101</strong> or <strong>STU-GANI8A-01</strong>) to view real-time exam marks, digital notes, search logs, and academic progress.
+                            Enter your child's SmartSlate Student Code (e.g. <strong>STU-101</strong> or <strong>STU-VAMS1A-11</strong> or <strong>STU-DAYA5A-63</strong>) to view real-time exam marks, digital notes, search logs, and academic progress.
                         </p>
                         <button class="glass-btn glass-btn-primary bouncy-btn" id="btn-empty-connect-child" style="padding: 12px 24px; font-size: 15px; font-weight: 700;">
                             <img src="/assets/icons/icon-add-account.svg" style="width: 18px; height: 18px; vertical-align: middle; margin-right: 6px;" alt="Connect">
@@ -224,8 +227,8 @@ const ParentView = {
             }
 
             // Select first child if none selected
-            if (!this.selectedChildId || !this.children.some(c => (c.student_id == this.selectedChildId || c.student_uid == this.selectedChildId))) {
-                this.selectedChildId = this.children[0].student_id || this.children[0].student_uid;
+            if (!this.selectedChildId || !this.children.some(c => (c.uid == this.selectedChildId || c.student_id == this.selectedChildId || c.student_uid == this.selectedChildId))) {
+                this.selectedChildId = this.children[0].uid || this.children[0].student_id || this.children[0].student_uid;
             }
 
             // Render Child Cards immediately without waiting for detailed tab data
@@ -1297,14 +1300,13 @@ const ParentView = {
             submitBtn.innerHTML = 'Connecting...';
 
             try {
-                let linked = false;
-                const parentUid = String(this.parentProfile?.uid || this.parentProfile?.id || App.currentUser?.uid || '').trim();
+                let linkedChild = null;
 
                 // 1. Firebase direct cloud link
                 if (window.firebaseAuthService) {
                     try {
-                        await window.firebaseAuthService.connectParentToStudent(parentUid, studentCode);
-                        linked = true;
+                        const fbRes = await window.firebaseAuthService.connectParentToStudent(parentUid, studentCode);
+                        if (fbRes?.child) linkedChild = fbRes.child;
                     } catch (fbErr) {
                         console.debug('[ParentView] Firebase connect note:', fbErr.message);
                     }
@@ -1312,17 +1314,27 @@ const ParentView = {
 
                 // 2. Backend API link
                 try {
-                    await API.linkChild(studentCode);
-                    linked = true;
+                    const apiRes = await API.linkChild(studentCode);
+                    console.log("[ParentView] Link response:", apiRes);
+                    if (apiRes?.child) linkedChild = apiRes.child;
                 } catch (apiErr) {
                     console.debug('[ParentView] API linkChild note:', apiErr.message);
-                    if (!linked) throw apiErr;
+                    if (!linkedChild) throw apiErr;
+                }
+
+                if (linkedChild) {
+                    const sid = String(linkedChild.uid || linkedChild.student_id || linkedChild.student_uid);
+                    if (!this.children.some(c => (c.uid == sid || c.student_id == sid || c.student_uid == sid || c.student_code == linkedChild.student_code || c.studentCode == linkedChild.studentCode))) {
+                        this.children.push(linkedChild);
+                        this.selectedChildId = sid;
+                    }
                 }
 
                 App.closeModal();
                 App.toast(`Student ${studentCode} connected successfully!`, 'success');
                 
-                // Reload children list
+                // Refresh children list immediately
+                console.log("[ParentView] Refreshing children...");
                 const wrapper = document.querySelector('.parent-dashboard-wrapper');
                 if (wrapper) {
                     await this.loadChildren(wrapper);
