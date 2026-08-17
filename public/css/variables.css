@@ -1,0 +1,99 @@
+/* SmartSlate Visual Design System Tokens */
+:root {
+    /* Color Palette - Child OS Design Tokens */
+    --paper-bg-primary: #F7F6F3;
+    --paper-bg-secondary: #F2F1EE;
+    --card-surface-base: #ECEAE6;
+    --divider-bg: #E7E5E1;
+    --border-color: #D7D4CF;
+
+    --text-primary: #2E2E2E;
+    --text-secondary: #767676;
+    --text-muted: #B7B7BB;
+
+    --accent-primary: #6B8FD8;
+    --accent-secondary: #8FB7F5;
+    --accent-hover: #5A7EC7;
+    --accent-light: rgba(107, 143, 216, 0.14);
+
+    --accent-coral: #FF6B6B;
+    --accent-coral-light: rgba(255, 107, 107, 0.15);
+    --accent-green: #2ECC71;
+    --accent-green-light: rgba(46, 204, 113, 0.15);
+    --accent-blue: #4D96FF;
+    --accent-blue-light: rgba(77, 150, 255, 0.15);
+    --accent-purple: #9B51E0;
+    --accent-purple-light: rgba(155, 81, 224, 0.15);
+    --accent-yellow: #FFD93D;
+    --accent-yellow-light: rgba(255, 217, 61, 0.2);
+
+    --status-success: #2ECC71;
+    --status-warning: #F39C12;
+    --status-danger: #E74C3C;
+
+    --touch-target-min: 44px;
+
+    --glass-bg: rgba(255, 255, 255, 0.55);
+    --glass-bg-subtle: rgba(255, 255, 255, 0.38);
+    --glass-bg-hover: rgba(255, 255, 255, 0.75);
+    --glass-border: 1px solid rgba(255, 255, 255, 0.7);
+    --glass-border-subtle: 1px solid var(--border-color);
+    --glass-backdrop-filter: blur(14px) saturate(140%);
+    --glass-shadow: 0 8px 24px -4px rgba(46, 46, 46, 0.06), 0 2px 6px -1px rgba(46, 46, 46, 0.04);
+    --glass-shadow-hover: 0 12px 32px -4px rgba(46, 46, 46, 0.12), 0 4px 12px -2px rgba(46, 46, 46, 0.06);
+
+    --radius-lg: 20px;
+    --radius-md: 16px;
+    --radius-sm: 10px;
+    --radius-pill: 9999px;
+
+    --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-size-base: 16px;
+    --font-size-sm: 14px;
+    --font-size-lg: 18px;
+    --font-size-xl: 22px;
+    --font-size-2xl: 28px;
+    --font-size-3xl: 36px;
+
+    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow-x: hidden;
+    font-family: var(--font-family);
+    font-size: var(--font-size-base);
+    color: var(--text-primary);
+    background-color: var(--paper-bg-primary);
+    -webkit-font-smoothing: antialiased;
+    -webkit-touch-callout: none;
+    user-select: none;
+}
+
+@keyframes mascotBounce {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-8px) scale(1.04); }
+}
+
+@keyframes bouncePress {
+    0% { transform: scale(1); }
+    40% { transform: scale(0.95); }
+    100% { transform: scale(1); }
+}
+
+.mascot-anim {
+    animation: mascotBounce 2.4s ease-in-out infinite;
+}
+
+.bouncy-btn:active {
+    animation: bouncePress 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}

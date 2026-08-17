@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SmartSlate — Parent & Teacher Web Portal</title>
+    
+    <!-- CSS Design System -->
+    <link rel="stylesheet" href="/css/variables.css?v=2.0">
+    <link rel="stylesheet" href="/css/components.css?v=2.0">
+    <link rel="stylesheet" href="/css/styles.css?v=2.0">
+</head>
+<body>
+
+    <svg style="display: none;">
+        <defs>
+            <g id="icon-book">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </g>
+            <g id="icon-assignment">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                <polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                <line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </g>
+            <g id="icon-chat">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </g>
+            <g id="icon-exam">
+                <path d="M9 11l3 3L22 4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </g>
+            <g id="icon-attendance">
+                <rect x="3" y="4" width="18" height="18" rx="3" ry="3" stroke="currentColor" stroke-width="2" fill="none"/>
+                <line x1="16" y1="2" x2="16" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <line x1="8" y1="2" x2="8" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <line x1="3" y1="10" x2="21" y2="10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </g>
+            <g id="icon-bell">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </g>
+            <g id="icon-settings">
+                <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" fill="none"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" stroke="currentColor" stroke-width="2" fill="none"/>
+            </g>
+            <g id="icon-user">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="2" fill="none"/>
+            </g>
+            <g id="icon-logout">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                <polyline points="16 17 21 12 16 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                <line x1="21" y1="12" x2="9" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </g>
+        </defs>
+    </svg>
+
+    <!-- Splash Screen -->
+    <div id="loading-screen">
+        <div class="splash-logo-container">
+            <div class="splash-icon" style="background: var(--accent-purple);">
+                👨‍👩‍👧‍🏫
+            </div>
+            <div class="splash-title">SmartSlate Cloud</div>
+        </div>
+        <div class="spinner"></div>
+        <p style="margin-top: 16px; color: var(--text-secondary); font-weight: 600;">Loading Parent & Teacher Portal...</p>
+    </div>
+
+    <div id="app">
+        <!-- Top Navbar -->
+        <header id="top-navbar" class="top-navbar" style="display: none;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div class="nav-brand" id="nav-brand" onclick="App.navigateTo(App.currentUser ? App.currentUser.role : 'auth')">
+                    <div class="nav-logo-icon" style="background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));">
+                        👨‍👩‍👧‍🏫
+                    </div>
+                    <div style="display: flex; flex-direction: column; text-align: left;">
+                        <span style="font-weight: 800; font-size: 18px; letter-spacing: -0.5px; background: linear-gradient(135deg, #9B51E0, #4D96FF); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">SmartSlate Portal</span>
+                        <span id="nav-role-tagline" class="glass-badge" style="font-size: 10px; padding: 1px 6px; text-transform: uppercase; font-weight: 700; width: max-content; margin-top: -2px;">Cloud Edition</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dynamic Nav Links -->
+            <nav class="nav-links" id="nav-dynamic-links"></nav>
+
+            <div class="nav-user-controls">
+                <div id="user-profile-badge" class="nav-profile-pill bouncy-btn">
+                    <span id="user-role-avatar" style="font-size: 20px;">👨‍👩‍👦</span>
+                    <div style="display: flex; flex-direction: column; text-align: left;">
+                        <span id="user-display-name" style="font-size: 13px; font-weight: 700; color: var(--text-primary);">User</span>
+                        <span id="user-display-role" style="font-size: 10px; color: var(--text-secondary); text-transform: capitalize;">Parent</span>
+                    </div>
+                </div>
+
+                <button class="nav-control-btn bouncy-btn" id="btn-open-settings" title="Settings" onclick="App.navigateTo('settings')">
+                    <img src="/assets/icons/icon-settings.svg" style="width: 20px; height: 20px;" alt="Settings">
+                </button>
+
+                <button class="nav-control-btn bouncy-btn" id="btn-lock-top-nav" title="Sign Out" onclick="App.logout()">
+                    <img src="/assets/icons/icon-logout.svg" style="width: 20px; height: 20px;" alt="Sign Out">
+                </button>
+            </div>
+        </header>
+
+        <!-- Main View Container -->
+        <main class="view-container">
+            <div id="view-auth" class="view-section" style="display: none;"></div>
+            <div id="view-parent" class="view-section" style="display: none;"></div>
+            <div id="view-teacher" class="view-section" style="display: none;"></div>
+            <div id="view-settings" class="view-section" style="display: none;"></div>
+        </main>
+
+        <div id="bottom-nav-bar" class="bottom-nav-bar"></div>
+    </div>
+
+    <div id="modal-container"></div>
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- JavaScript Dependencies -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="/shared/services/firebaseAuthService.js?v=2.0"></script>
+    <script src="/js/api.js?v=2.0"></script>
+    
+    <!-- View Modules -->
+    <script src="/js/views/authView.js?v=2.0"></script>
+    <script src="/js/views/parentView.js?v=2.0"></script>
+    <script src="/js/views/teacherView.js?v=2.0"></script>
+    <script src="/js/views/settingsView.js?v=2.0"></script>
+
+    <!-- Main Application Router -->
+    <script src="/js/app.js?v=2.0"></script>
+</body>
+</html>
