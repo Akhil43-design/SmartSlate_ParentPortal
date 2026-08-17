@@ -1780,28 +1780,32 @@ ${this.escapeHtml(typeof content === 'string' ? content : JSON.stringify(content
                     questions: questionsData
                 });
 
-                // Publish to Cloud Firestore
+                // Client sync (optional, backend API has already persisted the exam to Cloud Firestore)
                 if (window.firebaseAuthService) {
-                    const teacherUid = String(window.firebaseAuthService.auth?.currentUser?.uid || App.currentUser?.uid || App.currentUser?.id || 'teacher_uid');
-                    await window.firebaseAuthService.createTeacherExam(teacherUid, {
-                        id: String(res?.examId || res?.id || `exam_${Date.now()}`),
-                        targetClass: String(targetClass),
-                        className: String(targetClass),
-                        classId: String(selectedClassObj?.classId || targetClass),
-                        targetSection: String(targetSection),
-                        educationLevel: String(selectedClassObj?.educationLevel || 'High School'),
-                        teacherName: String(App.currentUser?.name || 'Class Teacher'),
-                        subject: String(subject),
-                        title: String(title),
-                        examType: String(examType),
-                        startDate: String(startDate),
-                        startTime: String(startTime),
-                        endDate: String(endDate),
-                        endTime: String(endTime),
-                        durationMinutes: parseInt(duration, 10),
-                        questions: questionsData,
-                        recipientStudentUids: recipientUids
-                    }).catch(err => console.warn('Firestore exam write warning:', err.message));
+                    try {
+                        const teacherUid = String(window.firebaseAuthService.auth?.currentUser?.uid || App.currentUser?.uid || App.currentUser?.id || 'teacher_uid');
+                        await window.firebaseAuthService.createTeacherExam(teacherUid, {
+                            id: String(res?.examId || res?.id || `exam_${Date.now()}`),
+                            targetClass: String(targetClass),
+                            className: String(targetClass),
+                            classId: String(selectedClassObj?.classId || targetClass),
+                            targetSection: String(targetSection),
+                            educationLevel: String(selectedClassObj?.educationLevel || 'High School'),
+                            teacherName: String(App.currentUser?.name || 'Class Teacher'),
+                            subject: String(subject),
+                            title: String(title),
+                            examType: String(examType),
+                            startDate: String(startDate),
+                            startTime: String(startTime),
+                            endDate: String(endDate),
+                            endTime: String(endTime),
+                            durationMinutes: parseInt(duration, 10),
+                            questions: questionsData,
+                            recipientStudentUids: recipientUids
+                        });
+                    } catch (fbErr) {
+                        // Client Firestore sync is secondary to backend API cloud persistence
+                    }
                 }
 
                 App.closeModal();
