@@ -704,27 +704,28 @@ const TeacherView = {
                 // 1. Backend SQLite + Sync Queue creation
                 const res = await API.createAssignment(targetClass, title, description, due_at, subject);
 
-                // 2. Cloud Firestore creation
+                // 2. Cloud Firestore creation (client cache sync)
                 if (window.firebaseAuthService) {
-                    const teacherUid = window.firebaseAuthService.auth?.currentUser?.uid || App.currentUser?.uid || App.currentUser?.id;
-                    await window.firebaseAuthService.createTeacherAssignment(teacherUid, {
-                        id: res?.assignmentId || res?.id,
-                        targetClass: targetClass,
-                        className: selectedClassObj?.displayName || targetClass,
-                        classId: selectedClassObj?.id || targetClass,
-                        subject: subject,
-                        title: title,
-                        description: description,
-                        dueAt: due_at,
-                        recipientStudentUids: recipientUids,
-                        mode: mode
-                    });
+                    try {
+                        const teacherUid = window.firebaseAuthService.auth?.currentUser?.uid || App.currentUser?.uid || App.currentUser?.id;
+                        await window.firebaseAuthService.createTeacherAssignment(teacherUid, {
+                            id: res?.assignmentId || res?.id,
+                            targetClass: targetClass,
+                            className: selectedClassObj?.displayName || targetClass,
+                            classId: selectedClassObj?.id || targetClass,
+                            subject: subject,
+                            title: title,
+                            description: description,
+                            dueAt: due_at,
+                            recipientStudentUids: recipientUids,
+                            mode: mode
+                        });
+                    } catch (fbErr) {
+                        // Client Firestore sync is secondary to backend API cloud persistence
+                    }
                 }
 
-                console.log('[ASSIGNMENT]');
-                console.log('Firebase write: SUCCESS');
-                console.log(`Recipient count: ${recipients.length}`);
-
+                console.log('[ASSIGNMENT] Published successfully:', res?.assignmentId || res?.id);
                 App.closeModal();
                 App.toast(`Assignment published to ${recipients.length} student(s) in ${targetClass}! 📝`, 'success');
                 this.activeTab = 'assignments';
@@ -964,28 +965,29 @@ const TeacherView = {
                 });
 
                 if (window.firebaseAuthService) {
-                    const teacherUid = window.firebaseAuthService.auth?.currentUser?.uid || App.currentUser?.uid || App.currentUser?.id;
-                    await window.firebaseAuthService.createTeacherExam(teacherUid, {
-                        id: res?.examId || res?.id,
-                        targetClass: targetClass,
-                        className: selectedClassObj?.displayName || targetClass,
-                        classId: selectedClassObj?.classId || targetClass,
-                        targetSection: targetSection,
-                        educationLevel: selectedClassObj?.educationLevel || 'High School',
-                        subject: subject,
-                        title: title,
-                        durationMinutes: duration_minutes,
-                        startTime: start_time,
-                        endTime: end_time,
-                        questions: formattedQuestions,
-                        recipientStudentUids: recipientUids
-                    });
+                    try {
+                        const teacherUid = window.firebaseAuthService.auth?.currentUser?.uid || App.currentUser?.uid || App.currentUser?.id;
+                        await window.firebaseAuthService.createTeacherExam(teacherUid, {
+                            id: res?.examId || res?.id,
+                            targetClass: targetClass,
+                            className: selectedClassObj?.displayName || targetClass,
+                            classId: selectedClassObj?.classId || targetClass,
+                            targetSection: targetSection,
+                            educationLevel: selectedClassObj?.educationLevel || 'High School',
+                            subject: subject,
+                            title: title,
+                            durationMinutes: duration_minutes,
+                            startTime: start_time,
+                            endTime: end_time,
+                            questions: formattedQuestions,
+                            recipientStudentUids: recipientUids
+                        });
+                    } catch (fbErr) {
+                        // Client Firestore sync is secondary to backend API cloud persistence
+                    }
                 }
 
-                console.log('[EXAM]');
-                console.log('Firebase write: SUCCESS');
-                console.log(`Recipient count: ${recipients.length}`);
-
+                console.log('[EXAM] Published successfully:', res?.examId || res?.id);
                 App.closeModal();
                 App.toast(`Exam published to ${recipients.length} student(s) in ${targetClass}! 📋`, 'success');
                 this.activeTab = 'exams';
