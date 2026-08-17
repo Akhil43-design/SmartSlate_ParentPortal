@@ -421,26 +421,32 @@ router.post('/login', authRateLimiter, async (req, res) => {
 
 // Get Logged In User
 router.get('/me', authenticateToken, async (req, res) => {
+    console.time("[AUTH/ME] total");
+    console.time("[AUTH/ME] session");
     try {
-        const userFromDb = await safeGet("SELECT id, name, role, email, parent_code, teacher_code, subject FROM users WHERE id = ?", [req.user.id]);
-        
         const formatted = {
-            id: req.user.id,
+            id: req.user.id || req.user.uid,
             uid: req.user.uid || String(req.user.id),
-            name: userFromDb?.name || req.user.name || 'User',
-            role: userFromDb?.role || req.user.role || 'parent',
-            email: userFromDb?.email || req.user.email,
-            teacher_code: userFromDb?.teacher_code || req.user.teacher_code || (req.user.role === 'teacher' ? `TCH-${req.user.id}` : null),
-            teacherCode: userFromDb?.teacher_code || req.user.teacherCode || (req.user.role === 'teacher' ? `TCH-${req.user.id}` : null),
-            parent_code: userFromDb?.parent_code || req.user.parent_code || (req.user.role === 'parent' ? `PAR-${req.user.id}` : null),
-            parentCode: userFromDb?.parent_code || req.user.parentCode || (req.user.role === 'parent' ? `PAR-${req.user.id}` : null),
-            subject: userFromDb?.subject || req.user.subject || 'Mathematics'
+            name: req.user.name || 'User',
+            role: req.user.role || 'parent',
+            email: req.user.email,
+            teacher_code: req.user.teacher_code || req.user.teacherCode || (req.user.role === 'teacher' ? `TCH-${req.user.id}` : null),
+            teacherCode: req.user.teacherCode || req.user.teacher_code || (req.user.role === 'teacher' ? `TCH-${req.user.id}` : null),
+            parent_code: req.user.parent_code || req.user.parentCode || (req.user.role === 'parent' ? `PAR-${req.user.id}` : null),
+            parentCode: req.user.parentCode || req.user.parent_code || (req.user.role === 'parent' ? `PAR-${req.user.id}` : null),
+            subject: req.user.subject || 'Mathematics'
         };
+        console.timeEnd("[AUTH/ME] session");
 
-        res.json({ user: formatted });
+        return res.json({
+            success: true,
+            user: formatted
+        });
     } catch (err) {
         console.error('Auth /me error:', err);
-        res.json({ user: req.user });
+        return res.json({ success: true, user: req.user });
+    } finally {
+        console.timeEnd("[AUTH/ME] total");
     }
 });
 
