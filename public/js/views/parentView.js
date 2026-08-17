@@ -197,56 +197,6 @@ const ParentView = {
         }
     },
 
-            if (!this.children.length) {
-                if (switcher) {
-                    switcher.innerHTML = `<div style="color: var(--text-muted); font-size: 14px; padding: 8px 0;">No children connected yet.</div>`;
-                }
-                if (heroCard) heroCard.style.display = 'none';
-                const tabContent = container.querySelector('#parent-active-tab-content');
-                if (tabContent) {
-                    tabContent.innerHTML = `
-                        <div class="glass-card" style="text-align: center; padding: 60px 20px; border-radius: 16px;">
-                            <img src="/assets/icons/icon-child-profile.svg" style="width: 64px; height: 64px; opacity: 0.7; margin-bottom: 16px;" alt="Child">
-                            <h3 style="font-size: 22px; font-weight: 800; color: var(--text-primary); margin: 0 0 8px 0;">No Student Linked Yet</h3>
-                            <p style="margin: 0 auto 24px auto; color: var(--text-secondary); max-width: 480px; font-size: 14px; line-height: 1.6;">
-                                Enter your child's SmartSlate Student Code (e.g. <strong>STU-101</strong> or <strong>STU-VAMS1A-11</strong> or <strong>STU-DAYA5A-63</strong>) to view real-time exam marks, digital notes, search logs, and academic progress.
-                            </p>
-                            <button class="glass-btn glass-btn-primary bouncy-btn" id="btn-empty-connect-child" style="padding: 12px 24px; font-size: 15px; font-weight: 700;">
-                                <img src="/assets/icons/icon-add-account.svg" style="width: 18px; height: 18px; vertical-align: middle; margin-right: 6px;" alt="Connect">
-                                <span>Connect Child Account</span>
-                            </button>
-                        </div>
-                    `;
-                    tabContent.querySelector('#btn-empty-connect-child')?.addEventListener('click', () => this.showConnectChildModal());
-                }
-                return;
-            }
-
-            // Select active child
-            if (!this.selectedChildId || !this.children.some(c => (c.uid == this.selectedChildId || c.student_id == this.selectedChildId || c.student_uid == this.selectedChildId))) {
-                this.selectedChildId = this.children[0].uid || this.children[0].student_id || this.children[0].student_uid;
-            }
-
-            this.renderChildrenSwitcher(container);
-            this.renderActiveChild(container);
-        } catch (err) {
-            console.error("[Parent] Failed to load children:", err);
-            if (switcher) {
-                switcher.innerHTML = `
-                    <div style="display: flex; align-items: center; gap: 10px; color: var(--status-danger); font-size: 13px; padding: 6px 0;">
-                        <span>Unable to load children. Please try again.</span>
-                        <button class="glass-btn glass-btn-secondary bouncy-btn" id="btn-retry-load-children" style="padding: 4px 12px; font-size: 12px; font-weight: 700;">
-                            🔄 Retry
-                        </button>
-                    </div>
-                `;
-                switcher.querySelector('#btn-retry-load-children')?.addEventListener('click', () => {
-                    this.loadChildren(container);
-                });
-            }
-        }
-    },
-
     renderChildrenSwitcher(container) {
         const switcher = container.querySelector('#parent-children-switcher-container');
         if (!switcher) return;
