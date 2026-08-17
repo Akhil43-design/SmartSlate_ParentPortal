@@ -225,10 +225,20 @@ router.post('/login', authRateLimiter, async (req, res) => {
             if (isStandardPass) {
                 const account = CANONICAL_ACCOUNTS[cleanEmail];
                 const token = generateToken(account);
+                
+                let firebaseCustomToken = null;
+                try {
+                    const admin = require('firebase-admin');
+                    if (admin.apps && admin.apps.length > 0) {
+                        firebaseCustomToken = await admin.auth().createCustomToken(account.uid);
+                    }
+                } catch (e) {}
+
                 return res.json({
                     message: 'Logged in successfully!',
                     token,
-                    user: account
+                    user: account,
+                    firebaseCustomToken
                 });
             }
         }

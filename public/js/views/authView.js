@@ -153,13 +153,20 @@ const AuthView = {
                     if (res && res.user && res.token) {
                         userObj = res.user;
                         token = res.token;
+
+                        // If backend returned a Firebase Custom Token, sign in to Firebase Client SDK instantly
+                        if (res.firebaseCustomToken && window.firebaseAuthService && typeof window.firebaseAuthService.signInWithCustomToken === 'function') {
+                            try {
+                                await window.firebaseAuthService.signInWithCustomToken(res.firebaseCustomToken);
+                            } catch (e) {}
+                        }
                     }
                 } catch (apiErr) {
                     console.warn('[Portal Auth] API login note:', apiErr.message);
                 }
 
-                // 2. Client Firebase Auth companion - Always authenticate Firebase Client SDK so request.auth is populated for Firestore rules
-                if (window.firebaseAuthService && typeof window.firebaseAuthService.signIn === 'function') {
+                // 2. Client Firebase Auth companion - Authenticate Firebase Client SDK so request.auth is populated for Firestore rules
+                if (window.firebaseAuthService && !window.firebaseAuthService.auth?.currentUser && typeof window.firebaseAuthService.signIn === 'function') {
                     try {
                         const fbRes = await window.firebaseAuthService.signIn(email, password);
                         if (fbRes && fbRes.user) {

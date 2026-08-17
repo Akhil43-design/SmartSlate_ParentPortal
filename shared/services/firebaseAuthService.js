@@ -66,7 +66,22 @@ class FirebaseAuthService {
         this.init();
         if (!this.auth) throw new Error('Firebase Auth service unavailable');
         try {
-            const userCredential = await this.auth.signInWithEmailAndPassword(email.trim(), password);
+            let userCredential = null;
+            try {
+                userCredential = await this.auth.signInWithEmailAndPassword(email.trim(), password);
+            } catch (authErr) {
+                // If user doesn't exist in Google Identity Toolkit yet, register it dynamically
+                if (authErr.code === 'auth/user-not-found' || authErr.code === 'auth/invalid-credential') {
+                    try {
+                        userCredential = await this.auth.createUserWithEmailAndPassword(email.trim(), password);
+                    } catch (createErr) {
+                        throw authErr;
+                    }
+                } else {
+                    throw authErr;
+                }
+            }
+
             const user = userCredential.user;
             const uid = user.uid;
 
@@ -113,8 +128,21 @@ class FirebaseAuthService {
                 idToken: await user.getIdToken()
             };
         } catch (err) {
-            console.warn('[FirebaseAuth] Sign in error:', err.message);
+            console.warn('[FirebaseAuth] Sign in note:', err.message);
             throw err;
+        }
+    }
+
+    // Sign in using a server-minted Firebase Custom Token
+    async signInWithCustomToken(customToken) {
+        this.init();
+        if (!this.auth || !customToken) return null;
+        try {
+            const cred = await this.auth.signInWithCustomToken(customToken);
+            return cred.user;
+        } catch (e) {
+            console.warn('[FirebaseAuthService] custom token sign in note:', e.message);
+            return null;
         }
     }
 
