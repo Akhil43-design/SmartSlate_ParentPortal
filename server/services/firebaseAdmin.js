@@ -61,87 +61,72 @@ function withTimeout(promise, ms = 8000, errorMsg = 'Firestore operation timed o
     ]);
 }
 
-// Firestore REST Query Helper
+// Firestore REST Query Helper using native fetch
 async function firestoreRestQuery(collectionId, filters = [], limit = 50) {
-    return new Promise((resolve) => {
-        const timer = setTimeout(() => resolve([]), 4000);
-        try {
-            let structuredQuery = { from: [{ collectionId }], limit };
-            if (filters.length === 1) {
-                structuredQuery.where = {
-                    fieldFilter: {
-                        field: { fieldPath: filters[0].field },
-                        op: filters[0].op || 'EQUAL',
-                        value: filters[0].value
-                    }
-                };
-            }
-
-            const postData = JSON.stringify({ structuredQuery });
-            const req = https.request({
-                hostname: 'firestore.googleapis.com',
-                path: `/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery?key=${REST_API_KEY}`,
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Content-Length': Buffer.byteLength(postData)
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    try {
+        let structuredQuery = { from: [{ collectionId }], limit };
+        if (filters.length === 1) {
+            structuredQuery.where = {
+                fieldFilter: {
+                    field: { fieldPath: filters[0].field },
+                    op: filters[0].op || 'EQUAL',
+                    value: filters[0].value
                 }
-            }, (res) => {
-                let body = '';
-                res.on('data', chunk => body += chunk);
-                res.on('end', () => {
-                    clearTimeout(timer);
-                    try {
-                        const parsed = JSON.parse(body);
-                        if (!Array.isArray(parsed)) return resolve([]);
-                        const results = [];
-                        for (const item of parsed) {
-                            if (item.document && item.document.fields) {
-                                results.push(parseFirestoreDoc(item.document));
-                            }
-                        }
-                        resolve(results);
-                    } catch (e) { resolve([]); }
-                });
-            });
-            req.on('error', () => { clearTimeout(timer); resolve([]); });
-            req.write(postData);
-            req.end();
-        } catch (e) { clearTimeout(timer); resolve([]); }
-    });
+            };
+        }
+
+        const res = await fetch(`https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery?key=${REST_API_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ structuredQuery }),
+            signal: controller.signal
+        });
+
+        if (!res.ok) return [];
+        const parsed = await res.json();
+        if (!Array.isArray(parsed)) return [];
+        const results = [];
+        for (const item of parsed) {
+            if (item.document && item.document.fields) {
+                results.push(parseFirestoreDoc(item.document));
+            }
+        }
+        return results;
+    } catch (e) {
+        return [];
+    } finally {
+        clearTimeout(timeout);
+    }
 }
 
-// Firestore REST Document Set Helper
+// Firestore REST Document Set Helper using native fetch
 async function firestoreRestSet(collection, docId, data) {
-    return new Promise((resolve) => {
-        const timer = setTimeout(() => resolve(false), 4000);
-        try {
-            const fields = {};
-            for (const [k, v] of Object.entries(data)) {
-                if (typeof v === 'string') fields[k] = { stringValue: v };
-                else if (typeof v === 'number') fields[k] = { integerValue: String(v) };
-                else if (typeof v === 'boolean') fields[k] = { booleanValue: v };
-                else if (Array.isArray(v)) fields[k] = { arrayValue: { values: v.map(x => ({ stringValue: String(x) })) } };
-            }
-            const maskParams = Object.keys(fields).map(k => 'updateMask.fieldPaths=' + encodeURIComponent(k)).join('&');
-            const postData = JSON.stringify({ fields });
-            const req = https.request({
-                hostname: 'firestore.googleapis.com',
-                path: `/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collection}/${docId}?${maskParams}&key=${REST_API_KEY}`,
-                method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Content-Length': Buffer.byteLength(postData)
-                }
-            }, (res) => {
-                clearTimeout(timer);
-                resolve(res.statusCode >= 200 && res.statusCode < 300);
-            });
-            req.on('error', () => { clearTimeout(timer); resolve(false); });
-            req.write(postData);
-            req.end();
-        } catch (e) { clearTimeout(timer); resolve(false); }
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    try {
+        const fields = {};
+        for (const [k, v] of Object.entries(data)) {
+            if (typeof v === 'string') fields[k] = { stringValue: v };
+            else if (typeof v === 'number') fields[k] = { integerValue: String(v) };
+            else if (typeof v === 'boolean') fields[k] = { booleanValue: v };
+            else if (Array.isArray(v)) fields[k] = { arrayValue: { values: v.map(x => ({ stringValue: String(x) })) } };
+        }
+        const maskParams = Object.keys(fields).map(k => 'updateMask.fieldPaths=' + encodeURIComponent(k)).join('&');
+
+        const res = await fetch(`https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collection}/${docId}?${maskParams}&key=${REST_API_KEY}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields }),
+            signal: controller.signal
+        });
+        return res.ok;
+    } catch (e) {
+        return false;
+    } finally {
+        clearTimeout(timeout);
+    }
 }
 
 function parseFirestoreDoc(doc) {
