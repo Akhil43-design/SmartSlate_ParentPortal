@@ -167,10 +167,12 @@ const ParentView = {
                             "Firestore connections timeout"
                         );
 
-                        console.log(`[Parent] Connection documents found: ${snap.size}`);
+                        console.log("[Parent] Connection documents found:", snap.size);
 
                         for (const doc of snap.docs) {
                             const connData = doc.data();
+                            console.log("[Parent] Connection:", doc.id, connData);
+
                             const studentUid = connData.studentUid || connData.student_uid || doc.id.split('_')[0];
                             if (studentUid) {
                                 let studentData = {};
@@ -183,6 +185,8 @@ const ParentView = {
                                         studentData = sDocSnap.data() || {};
                                     }
                                 } catch (e) {}
+
+                                console.log("[Parent] Student profile:", studentUid, studentData);
 
                                 const cleanStudent = {
                                     uid: studentUid,

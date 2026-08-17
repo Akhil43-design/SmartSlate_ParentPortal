@@ -33,37 +33,56 @@ service cloud.firestore {
     }
 
     match /students/{uid} {
-      allow read: if signedIn() &&
-                     (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+      allow read: if signedIn() && (
+        request.auth.uid == uid ||
+        isConnectedParent(uid) ||
+        isConnectedTeacher(uid) ||
+        (resource != null && resource.data.parentIds != null && request.auth.uid in resource.data.parentIds) ||
+        exists(/databases/$(database)/documents/student_parent_connections/$(uid + '_' + request.auth.uid))
+      );
 
-      allow create: if signedIn() &&
-                       request.auth.uid == uid &&
-                       request.resource.data.uid == request.auth.uid;
-
-      allow update: if signedIn() &&
-                       (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
-
-      allow delete: if signedIn() &&
-                       request.auth.uid == uid;
+      allow create: if signedIn();
+      allow update: if signedIn() && (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+      allow delete: if signedIn() && request.auth.uid == uid;
 
       match /tasks/{taskId} {
-        allow read: if signedIn() &&
-                       (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+        allow read: if signedIn() && (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
         allow write: if signedIn() && request.auth.uid == uid;
       }
 
       match /notes/{noteId} {
-        allow read: if signedIn() &&
-                       (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
-        allow create, update, delete: if signedIn() &&
-                                              request.auth.uid == uid;
+        allow read: if signedIn() && (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+        allow create, update, delete: if signedIn() && request.auth.uid == uid;
       }
 
       match /books/{bookId} {
-        allow read: if signedIn() &&
-                       (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
-        allow create, update, delete: if signedIn() &&
-                                              request.auth.uid == uid;
+        allow read: if signedIn() && (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+        allow create, update, delete: if signedIn() && request.auth.uid == uid;
+      }
+
+      match /search_history/{searchId} {
+        allow read: if signedIn() && (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+        allow create, update: if signedIn() && request.auth.uid == uid;
+      }
+
+      match /exam_submissions/{examId} {
+        allow read: if signedIn() && (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+        allow write: if signedIn();
+      }
+
+      match /exam_drafts/{examId} {
+        allow read: if signedIn() && (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+        allow write: if signedIn() && request.auth.uid == uid;
+      }
+
+      match /attendance/{attId} {
+        allow read: if signedIn() && (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+        allow write: if signedIn();
+      }
+
+      match /progress/{progressId} {
+        allow read: if signedIn() && (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+        allow write: if signedIn();
       }
     }
 
@@ -77,12 +96,64 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create, update: if signedIn() && request.auth.uid == uid;
       allow delete: if signedIn() && request.auth.uid == uid;
+
+      match /assignments/{assignmentId} {
+        allow read: if signedIn();
+        allow write: if signedIn() && request.auth.uid == uid;
+      }
+
+      match /exams/{examId} {
+        allow read: if signedIn();
+        allow write: if signedIn() && request.auth.uid == uid;
+      }
+
+      match /announcements/{announcementId} {
+        allow read: if signedIn();
+        allow write: if signedIn() && request.auth.uid == uid;
+      }
+    }
+
+    match /assignments/{assignmentId} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+    }
+
+    match /exams/{examId} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+
+      match /{document=**} {
+        allow read: if signedIn();
+        allow write: if signedIn();
+      }
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if signedIn();
+      allow write: if signedIn();
     }
 
     match /student_parent_connections/{connectionId} {
-      allow read: if signedIn();
-      allow create, update: if signedIn();
-      allow delete: if signedIn();
+      allow read: if signedIn() && (
+        resource.data.parentUid == request.auth.uid ||
+        resource.data.parent_uid == request.auth.uid ||
+        resource.data.studentUid == request.auth.uid ||
+        resource.data.student_uid == request.auth.uid
+      );
+      allow create: if signedIn() && (
+        request.resource.data.parentUid == request.auth.uid ||
+        request.resource.data.parent_uid == request.auth.uid ||
+        request.resource.data.studentUid == request.auth.uid ||
+        request.resource.data.student_uid == request.auth.uid
+      );
+      allow update: if signedIn() && (
+        resource.data.parentUid == request.auth.uid ||
+        resource.data.parent_uid == request.auth.uid
+      );
+      allow delete: if signedIn() && (
+        resource.data.parentUid == request.auth.uid ||
+        resource.data.parent_uid == request.auth.uid
+      );
     }
 
     match /student_teacher_connections/{connectionId} {

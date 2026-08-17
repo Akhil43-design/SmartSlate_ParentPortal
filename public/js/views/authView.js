@@ -158,13 +158,17 @@ const AuthView = {
                     console.warn('[Portal Auth] API login note:', apiErr.message);
                 }
 
-                // 2. Client Firebase Auth fallback/companion
-                if (!userObj && window.firebaseAuthService && typeof window.firebaseAuthService.signIn === 'function') {
+                // 2. Client Firebase Auth companion - Always authenticate Firebase Client SDK so request.auth is populated for Firestore rules
+                if (window.firebaseAuthService && typeof window.firebaseAuthService.signIn === 'function') {
                     try {
                         const fbRes = await window.firebaseAuthService.signIn(email, password);
                         if (fbRes && fbRes.user) {
-                            userObj = fbRes.user;
-                            token = fbRes.idToken;
+                            if (!userObj) userObj = fbRes.user;
+                            if (!token) token = fbRes.idToken;
+                            if (userObj) {
+                                userObj.firebaseUid = fbRes.user.uid;
+                                userObj.uid = fbRes.user.uid || userObj.uid;
+                            }
                         }
                     } catch (fbErr) {
                         console.warn('[Portal Auth] Client Firebase sign in note:', fbErr.message);
