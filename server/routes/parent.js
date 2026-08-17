@@ -77,12 +77,22 @@ router.get('/child/:id/overview', authenticateToken, requireRole('parent'), asyn
         const childId = req.params.id;
         return res.json({
             success: true,
+            kpis: {
+                overallProgress: 88,
+                examAverage: 86.5,
+                examsCompleted: 6,
+                assignmentsCompleted: 14,
+                totalAssignments: 16,
+                attendancePercentage: 94.8,
+                notebooksCount: 8,
+                searchesCount: 24
+            },
             overview: {
                 student_id: childId,
-                avg_score: 84.5,
-                attendance_rate: 94.2,
-                completed_assignments: 18,
-                total_notes: 12
+                avg_score: 86.5,
+                attendance_rate: 94.8,
+                completed_assignments: 14,
+                total_notes: 8
             }
         });
     } catch (err) {

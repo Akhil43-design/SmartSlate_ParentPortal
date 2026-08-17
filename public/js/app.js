@@ -10,18 +10,19 @@ const App = {
         // 1. Firebase Auth Observer
         if (window.firebaseAuthService) {
             window.firebaseAuthService.onAuthStateChanged(async (fbUser) => {
-                if (fbUser && !this.currentUser) {
-                    console.log('✅ [Portal Auth] Restored session for:', fbUser.email);
+                if (fbUser && fbUser.email) {
+                    console.log('✅ [Portal Auth] Firebase Auth active for:', fbUser.email);
                 }
             });
         }
 
-        // 2. Local Token / SQLite Session
+        // 2. Local Token / Session Restore
         const token = API.getToken();
         if (token) {
             try {
                 const res = await API.getCurrentUser();
                 this.currentUser = res.user;
+                console.log('✅ [Portal Auth] Restored session for:', this.currentUser.name, `(${this.currentUser.role})`);
                 this.navigateTo(res.user.role);
             } catch (err) {
                 console.warn('Session check failed:', err);
