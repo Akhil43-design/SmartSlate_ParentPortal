@@ -17,12 +17,23 @@ async function fetchTeacherConnectedClasses(teacherId, teacherUid, teacherCode) 
                 studentMap.set(key, {
                     uid: key,
                     id: key,
+                    student_id: key,
+                    student_uid: key,
                     name: st.name || st.student_name || 'Student',
+                    student_name: st.name || st.student_name || 'Student',
                     studentCode: st.studentCode || st.student_code || `STU-${key.slice(0, 4)}`,
+                    student_code: st.studentCode || st.student_code || `STU-${key.slice(0, 4)}`,
+                    class: st.class || st.class_name || st.grade || '8',
+                    class_name: st.class || st.class_name || st.grade || '8',
                     grade: String(st.class || st.class_name || st.grade || '8').trim(),
                     section: String(st.section || 'A').trim().toUpperCase(),
                     educationLevel: st.educationLevel || st.education_level || 'HIGH_SCHOOL',
+                    education_level: st.educationLevel || st.education_level || 'HIGH_SCHOOL',
+                    school: st.school || st.schoolName || 'SmartSlate Academy',
+                    schoolName: st.school || st.schoolName || 'SmartSlate Academy',
                     subject: st.subject || 'Mathematics',
+                    status: 'Connected ✓',
+                    avg_exam_score: st.avg_exam_score || 90,
                     classId: `class-${String(st.class || st.grade || '8').toLowerCase().replace(/[^a-z0-9]/g, '-')}-${String(st.section || 'a').toLowerCase()}`
                 });
             });

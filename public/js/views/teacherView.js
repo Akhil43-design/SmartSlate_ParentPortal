@@ -343,21 +343,23 @@ const TeacherView = {
                             }
 
                             const sName = s.name || s.student_name || 'Student';
-                            const sClass = s.class || s.class_name || 'Class 8';
+                            const sCode = s.studentCode || s.student_code || 'STU';
+                            const sClass = s.class || s.class_name || s.grade || 'Class 8';
                             const sSec = s.section || 'A';
                             const sSubj = s.subject || (s.subjects && s.subjects[0]) || 'Mathematics';
+                            const sId = s.student_id || s.uid || s.student_uid || sCode;
 
                             return `
                                 <tr style="border-bottom: 1px solid var(--border-color); background: ${rowBg}; transition: background 150ms ease;">
                                     <td style="padding: 14px 12px; font-weight: 700; color: var(--text-primary);">${sName}</td>
-                                    <td style="padding: 14px 12px; color: var(--accent-primary); font-weight: 600;">${s.student_code}</td>
+                                    <td style="padding: 14px 12px; color: var(--accent-primary); font-weight: 600;">${sCode}</td>
                                     <td style="padding: 14px 12px;">${sClass} - ${sSec}</td>
                                     <td style="padding: 14px 12px; font-weight: 600; color: #4F46E5;">${sSubj}</td>
                                     <td style="padding: 14px 12px;"><span class="glass-badge" style="background: rgba(16,185,129,0.15); color: #059669; font-weight: 700;">Connected ✓</span></td>
                                     <td style="padding: 14px 12px; font-weight: 700;">${avgScoreNum}%</td>
                                     <td style="padding: 14px 12px;"><span class="glass-badge ${badgeClass}">${stateLabel}</span></td>
                                     <td style="padding: 14px 12px; text-align: right;">
-                                        <button class="glass-btn glass-btn-sm btn-view-student bouncy-btn" data-id="${s.student_id}">
+                                        <button class="glass-btn glass-btn-sm btn-view-student bouncy-btn" data-id="${sId}">
                                             <span>View Details →</span>
                                         </button>
                                     </td>
