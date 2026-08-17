@@ -692,13 +692,13 @@ const TeacherView = {
             const due_at = modal.querySelector('#assign-due-date').value;
             const description = modal.querySelector('#assign-description').value;
 
-            const selectedClassObj = targetClasses.find(c => c.rawClass === targetClass);
-            const recipients = selectedClassObj ? selectedClassObj.students : [];
-            const recipientUids = recipients.map(r => r.student_uid || r.student_id);
+            const selectedClassObj = targetClasses.find(c => (c.rawClass === targetClass || c.grade === targetClass || c.displayName === targetClass || c.name === targetClass || String(c.grade) === String(targetClass)));
+            const recipients = selectedClassObj ? selectedClassObj.students : (targetClasses[0]?.students || this.students || []);
+            const recipientUids = recipients.map(r => r.uid || r.student_uid || r.student_id);
 
             console.log('[TARGET CLASS]');
-            console.log(`Selected class:\n${targetClass}`);
-            console.log(`Recipients:\n${recipients.map(r => r.name || r.student_name).join('\n')}`);
+            console.log(`Selected class:\n${targetClass || selectedClassObj?.displayName || 'All Students'}`);
+            console.log(`Recipients:\n${recipients.map(r => r.name || r.student_name || r.studentCode || r.code).join('\n')}`);
 
             try {
                 // 1. Backend SQLite + Sync Queue creation

@@ -1923,28 +1923,9 @@ class FirebaseAuthService {
         }
     }
 
-    // Publish Teacher Exam to Cloud Firestore
+    // Publish Teacher Exam to Cloud Firestore (Authoritatively saved via backend REST API)
     async createTeacherExam(teacherUid, examData) {
-        this.init();
-        const safeTeacherUid = String(teacherUid || this.auth?.currentUser?.uid || 'teacher_uid');
-        const examId = String(examData?.id || `exam_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`);
-        const payload = {
-            ...examData,
-            id: examId,
-            teacherUid: safeTeacherUid,
-            created_by: safeTeacherUid,
-            createdAt: this.getTimestamp(),
-            status: 'active'
-        };
-        if (this.db && this.auth?.currentUser) {
-            try {
-                await this.db.collection('exams').doc(examId).set(payload, { merge: true });
-                console.log(`🔥 [Firestore] Client exam cache synced: ${examId}`);
-            } catch (e) {
-                // Client permission/adblocker fallback: Backend REST API has already persisted the exam to Cloud Firestore
-            }
-        }
-        return payload;
+        return examData;
     }
 
     // Fetch Teacher Exams from Cloud Firestore
@@ -1967,28 +1948,9 @@ class FirebaseAuthService {
         }
     }
 
-    // Publish Teacher Assignment to Cloud Firestore
+    // Publish Teacher Assignment to Cloud Firestore (Authoritatively saved via backend REST API)
     async createTeacherAssignment(teacherUid, assignmentData) {
-        this.init();
-        const safeTeacherUid = String(teacherUid || this.auth?.currentUser?.uid || 'teacher_uid');
-        const assignmentId = String(assignmentData?.id || `assign_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`);
-        const payload = {
-            ...assignmentData,
-            id: assignmentId,
-            teacherUid: safeTeacherUid,
-            created_by: safeTeacherUid,
-            createdAt: this.getTimestamp(),
-            status: 'active'
-        };
-        if (this.db && this.auth?.currentUser) {
-            try {
-                await this.db.collection('assignments').doc(assignmentId).set(payload, { merge: true });
-                console.log(`🔥 [Firestore] Client assignment cache synced: ${assignmentId}`);
-            } catch (e) {
-                // Client permission/adblocker fallback: Backend REST API has already persisted the assignment to Cloud Firestore
-            }
-        }
-        return payload;
+        return assignmentData;
     }
 
     // Fetch Teacher Assignments from Cloud Firestore
@@ -2011,36 +1973,9 @@ class FirebaseAuthService {
         }
     }
 
-    // Publish Teacher Announcement to Cloud Firestore
+    // Publish Teacher Announcement to Cloud Firestore (Authoritatively saved via backend REST API)
     async createTeacherAnnouncement(teacherUid, announcementData) {
-        this.init();
-        const timestamp = this.getTimestamp();
-        const safeTeacherUid = String(teacherUid || this.auth?.currentUser?.uid || 'teacher_uid');
-        const safeAnnouncementId = String(announcementData?.id || `ann_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`);
-
-        const payload = {
-            id: safeAnnouncementId,
-            teacherUid: safeTeacherUid,
-            teacherName: String(announcementData?.teacherName || 'Class Teacher'),
-            classId: String(announcementData?.classId || 'all'),
-            title: String(announcementData?.title || 'Class Announcement').trim(),
-            content: String(announcementData?.content || announcementData?.message || '').trim(),
-            subject: String(announcementData?.subject || 'General Notice'),
-            createdAt: timestamp
-        };
-
-        if (this.db && this.auth?.currentUser) {
-            try {
-                if (safeTeacherUid && safeTeacherUid !== 'teacher_uid') {
-                    await this.db.collection('teachers').doc(safeTeacherUid).collection('announcements').doc(safeAnnouncementId).set(payload, { merge: true }).catch(() => {});
-                }
-                await this.db.collection('announcements').doc(safeAnnouncementId).set(payload, { merge: true });
-                console.log(`🔥 [Firestore] Client announcement cache synced: ${safeAnnouncementId}`);
-            } catch (e) {
-                // Client fallback: Backend REST API handles persistence
-            }
-        }
-        return payload;
+        return announcementData;
     }
 
     // Fetch Teacher Announcements
