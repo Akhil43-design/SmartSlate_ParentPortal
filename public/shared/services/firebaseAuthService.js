@@ -61,6 +61,63 @@ class FirebaseAuthService {
         return new Date().toISOString();
     }
 
+    // Sign In via Firebase Auth with Firestore Role Profile resolution
+    async signIn(email, password) {
+        this.init();
+        if (!this.auth) throw new Error('Firebase Auth service unavailable');
+        try {
+            const userCredential = await this.auth.signInWithEmailAndPassword(email.trim(), password);
+            const user = userCredential.user;
+            const uid = user.uid;
+
+            let role = 'parent';
+            let profile = null;
+
+            // Check if teacher
+            try {
+                const tDoc = await this.db.collection('teachers').doc(uid).get();
+                if (tDoc && tDoc.exists) {
+                    role = 'teacher';
+                    profile = tDoc.data();
+                }
+            } catch (e) {}
+
+            // Check if parent if not teacher
+            if (!profile) {
+                try {
+                    const pDoc = await this.db.collection('parents').doc(uid).get();
+                    if (pDoc && pDoc.exists) {
+                        role = 'parent';
+                        profile = pDoc.data();
+                    }
+                } catch (e) {}
+            }
+
+            const name = profile?.name || profile?.fullName || user.displayName || email.split('@')[0];
+            const teacherCode = profile?.teacherCode || profile?.teacher_code || (role === 'teacher' ? `TCH-${uid.substring(0, 5)}` : null);
+            const parentCode = profile?.parentCode || profile?.parent_code || (role === 'parent' ? `PAR-${uid.substring(0, 5)}` : null);
+
+            return {
+                user: {
+                    id: uid,
+                    uid,
+                    name,
+                    role,
+                    email: user.email,
+                    teacherCode,
+                    teacher_code: teacherCode,
+                    parentCode,
+                    parent_code: parentCode,
+                    subject: profile?.subject || 'Physical Science & Mathematics'
+                },
+                idToken: await user.getIdToken()
+            };
+        } catch (err) {
+            console.warn('[FirebaseAuth] Sign in error:', err.message);
+            throw err;
+        }
+    }
+
     // Helper to acquire Firebase UID via signup
     async acquireUserUid(email, password) {
         this.init();

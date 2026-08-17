@@ -134,17 +134,59 @@ const AuthView = {
 
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const email = container.querySelector('#login-email').value;
-            const password = container.querySelector('#login-password').value;
+            const email = (container.querySelector('#login-email').value || '').trim();
+            const password = (container.querySelector('#login-password').value || '').trim();
+            const submitBtn = loginForm.querySelector('button[type="submit"]');
+
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Signing in...';
+            }
 
             try {
-                const res = await API.login(email, password);
-                API.setToken(res.token);
-                App.currentUser = res.user;
-                App.toast(`Welcome back, ${res.user.name}! 🎉`, 'success');
-                App.navigateTo(res.user.role);
+                let userObj = null;
+                let token = null;
+
+                // 1. Authenticate via Server API
+                try {
+                    const res = await API.login(email, password);
+                    if (res && res.user && res.token) {
+                        userObj = res.user;
+                        token = res.token;
+                    }
+                } catch (apiErr) {
+                    console.warn('[Portal Auth] API login note:', apiErr.message);
+                }
+
+                // 2. Client Firebase Auth fallback/companion
+                if (!userObj && window.firebaseAuthService && typeof window.firebaseAuthService.signIn === 'function') {
+                    try {
+                        const fbRes = await window.firebaseAuthService.signIn(email, password);
+                        if (fbRes && fbRes.user) {
+                            userObj = fbRes.user;
+                            token = fbRes.idToken;
+                        }
+                    } catch (fbErr) {
+                        console.warn('[Portal Auth] Client Firebase sign in note:', fbErr.message);
+                    }
+                }
+
+                if (!userObj) {
+                    throw new Error('Invalid email or password. Please verify your credentials.');
+                }
+
+                API.setToken(token);
+                App.currentUser = userObj;
+                App.toast(`Welcome back, ${userObj.name}! 🎉`, 'success');
+                App.navigateTo(userObj.role || 'parent');
             } catch (err) {
-                App.toast(err.message || 'Invalid credentials.', 'danger');
+                console.error('[Portal Auth] Login Error:', err);
+                App.toast(err.message || 'Login failed. Please check your credentials.', 'danger');
+            } finally {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Sign In to Portal';
+                }
             }
         });
 
