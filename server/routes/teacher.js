@@ -114,7 +114,7 @@ router.get('/classes', authenticateToken, requireRole('teacher'), async (req, re
         return res.status(200).json(result);
     } catch (err) {
         console.error('[TEACHER/CLASSES] Error:', err);
-        return res.status(200).json({ success: true, classes: [], students: [] });
+        return res.status(500).json({ success: false, error: err.message, classes: [], students: [] });
     }
 });
 
@@ -194,8 +194,9 @@ router.get('/students', authenticateToken, requireRole('teacher'), async (req, r
         });
     } catch (err) {
         console.error('[TEACHER/STUDENTS] Error:', err);
-        return res.status(200).json({
-            success: true,
+        return res.status(500).json({
+            success: false,
+            error: err.message,
             students: []
         });
     }

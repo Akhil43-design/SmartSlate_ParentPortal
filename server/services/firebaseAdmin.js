@@ -409,23 +409,21 @@ const FirebaseCloudService = {
      * Fetch connected students for a teacher UID
      */
     async getTeacherStudents(teacherUid) {
-        console.log("[TEACHER] Authenticated UID:", teacherUid);
-        console.log("[TEACHER] Querying connections for:", teacherUid);
         const safeTeacherUid = String(teacherUid || '').trim();
+        console.log("[TEACHER/STUDENTS] Fetching for teacher UID:", safeTeacherUid);
 
         if (!safeTeacherUid) {
-            console.log("[TEACHER] Connections found: 0");
-            console.log("[TEACHER] Students returned: 0");
+            console.log("[TEACHER/STUDENTS] Empty teacher UID, returning []");
             return [];
         }
 
         const results = new Map();
 
-        // 1. Check in-memory store
+        // 1. Check in-memory cache
         const mem = inMemoryTeacherConnections.get(safeTeacherUid) || inMemoryTeacherConnections.get('teacher_priya_01') || [];
         mem.forEach(s => results.set(String(s.uid || s.student_id), s));
 
-        // 2. Query Firebase Admin SDK
+        // 2. Query Firebase Admin SDK (Cloud Firestore)
         if (firestoreDb) {
             try {
                 const [snap1, snap2] = await Promise.all([
@@ -434,14 +432,16 @@ const FirebaseCloudService = {
                             .where('teacher_uid', '==', safeTeacherUid)
                             .where('status', '==', 'active')
                             .get(),
-                        8000
+                        3500,
+                        'teacher_uid query timeout'
                     ).catch(() => ({ empty: true, docs: [] })),
                     withTimeout(
                         firestoreDb.collection('student_teacher_connections')
                             .where('teacherUid', '==', safeTeacherUid)
                             .where('status', '==', 'active')
                             .get(),
-                        8000
+                        3500,
+                        'teacherUid query timeout'
                     ).catch(() => ({ empty: true, docs: [] }))
                 ]);
 
@@ -453,58 +453,71 @@ const FirebaseCloudService = {
                     return true;
                 });
 
-                console.log("[TEACHER] Connections found:", uniqueDocs.length);
+                console.log("[TEACHER/STUDENTS] Connections found in Firestore:", uniqueDocs.length);
 
-                for (const doc of uniqueDocs) {
+                // Fetch student profiles concurrently (Promise.all) with 2-second timeout
+                const studentPromises = uniqueDocs.map(async (doc) => {
                     const data = doc.data();
                     const studentUid = data.student_uid || data.studentUid || doc.id.split('_')[0];
                     const sCode = data.student_code || data.studentCode || '';
                     const sName = data.student_name || data.studentName || 'Student';
 
-                    if (studentUid) {
-                        let studentData = {};
-                        try {
-                            const sDocSnap = await withTimeout(
-                                firestoreDb.collection('students').doc(studentUid).get(),
-                                4000
-                            );
-                            if (sDocSnap.exists) studentData = sDocSnap.data() || {};
-                        } catch (e) {}
+                    if (!studentUid) return null;
 
-                        const cleanStudent = {
-                            uid: studentUid,
-                            student_id: studentUid,
-                            student_uid: studentUid,
-                            name: studentData.name || studentData.displayName || studentData.studentName || sName,
-                            student_name: studentData.name || studentData.displayName || studentData.studentName || sName,
-                            studentCode: studentData.studentCode || studentData.code || sCode || 'STU',
-                            student_code: studentData.studentCode || studentData.code || sCode || 'STU',
-                            class: studentData.class || studentData.className || studentData.grade || '8',
-                            class_name: studentData.class || studentData.className || studentData.grade || '8',
-                            grade: studentData.class || studentData.className || studentData.grade || '8',
-                            section: studentData.section || 'A',
-                            school: studentData.school || studentData.schoolName || 'SmartSlate Academy',
-                            schoolName: studentData.school || studentData.schoolName || 'SmartSlate Academy',
-                            educationLevel: studentData.educationLevel || 'HIGH_SCHOOL',
-                            subject: data.subject || 'Mathematics',
-                            status: 'Connected ✓',
-                            avg_exam_score: 90
-                        };
-
-                        results.set(studentUid, cleanStudent);
+                    let studentData = {};
+                    try {
+                        const sDocSnap = await withTimeout(
+                            firestoreDb.collection('students').doc(studentUid).get(),
+                            2000,
+                            'Student doc fetch timeout'
+                        );
+                        if (sDocSnap && sDocSnap.exists) {
+                            studentData = sDocSnap.data() || {};
+                        }
+                    } catch (e) {
+                        // Soft fallback to connection data
                     }
-                }
+
+                    return {
+                        uid: studentUid,
+                        student_id: studentUid,
+                        student_uid: studentUid,
+                        name: studentData.name || studentData.displayName || studentData.studentName || data.student_name || sName,
+                        student_name: studentData.name || studentData.displayName || studentData.studentName || data.student_name || sName,
+                        studentCode: studentData.studentCode || studentData.code || data.student_code || sCode || 'STU',
+                        student_code: studentData.studentCode || studentData.code || data.student_code || sCode || 'STU',
+                        class: studentData.class || studentData.className || studentData.grade || data.class || '8',
+                        class_name: studentData.class || studentData.className || studentData.grade || data.class || '8',
+                        grade: String(studentData.class || studentData.className || studentData.grade || data.class || '8').trim(),
+                        section: String(studentData.section || data.section || 'A').trim().toUpperCase(),
+                        school: studentData.school || studentData.schoolName || data.schoolName || 'SmartSlate Academy',
+                        schoolName: studentData.school || studentData.schoolName || data.schoolName || 'SmartSlate Academy',
+                        educationLevel: studentData.educationLevel || data.educationLevel || 'HIGH_SCHOOL',
+                        education_level: studentData.educationLevel || data.educationLevel || 'HIGH_SCHOOL',
+                        subject: data.subject || 'Mathematics',
+                        status: 'Connected ✓',
+                        avg_exam_score: 90
+                    };
+                });
+
+                const loadedStudents = await Promise.all(studentPromises);
+                loadedStudents.forEach(st => {
+                    if (st && st.uid) {
+                        results.set(st.uid, st);
+                    }
+                });
             } catch (e) {
-                console.warn("[TEACHER/STUDENTS] query note:", e.message);
+                console.warn("[TEACHER/STUDENTS] Admin SDK query note:", e.message);
             }
         }
 
-        // 3. Fallback to Firestore REST if Admin SDK is unavailable
+        // 3. Fallback to Firestore REST if Admin SDK returned no results
         if (results.size === 0) {
             try {
                 const conns = await firestoreRestQuery('student_teacher_connections', [
                     { field: 'teacher_uid', value: { stringValue: safeTeacherUid } }
                 ]);
+                console.log("[TEACHER/STUDENTS] REST fallback connections found:", conns.length);
                 for (const c of conns) {
                     const studentUid = c.student_uid || c.studentUid || c.id.split('_')[0];
                     if (studentUid) {
@@ -529,11 +542,13 @@ const FirebaseCloudService = {
                         });
                     }
                 }
-            } catch (e) {}
+            } catch (e) {
+                console.warn("[TEACHER/STUDENTS] REST query note:", e.message);
+            }
         }
 
         const finalStudents = Array.from(results.values());
-        console.log("[TEACHER] Students returned:", finalStudents.length);
+        console.log("[TEACHER/STUDENTS] Total students returned:", finalStudents.length);
         return finalStudents;
     },
 
