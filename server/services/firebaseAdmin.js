@@ -8,7 +8,9 @@ const https = require('https');
 
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || 'smartslate-bd117';
 const CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;
-const PRIVATE_KEY = process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined;
+const PRIVATE_KEY = process.env.FIREBASE_PRIVATE_KEY
+    ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n').replace(/^"|"$/g, '')
+    : undefined;
 const REST_API_KEY = process.env.VITE_FIREBASE_API_KEY || "AIzaSyBOgNWBVqSYfMypeZS8NwRLOYpq7DY3-ls";
 
 let firestoreDb = null;
@@ -49,6 +51,7 @@ try {
 
 // In-Memory Cloud Store (guarantees zero-latency consistency across serverless execution)
 const inMemoryCloudConnections = new Map();
+const inMemoryTeacherConnections = new Map();
 
 // Strict Bounded Timeout Helper (guarantees zero 504 serverless hangs)
 function withTimeout(promise, ms = 8000, errorMsg = 'Firestore operation timed out') {
@@ -160,7 +163,7 @@ const FirebaseCloudService = {
      * Fetch connected children for an authenticated parent UID
      */
     async getParentChildren(parentUid) {
-        console.log(`[PARENT/CHILDREN] Cloud Firestore query for parent UID: ${parentUid}`);
+        console.log("[PARENT/CHILDREN] start", parentUid);
         const safeParentUid = String(parentUid || '').trim();
 
         if (!safeParentUid) {
@@ -188,7 +191,7 @@ const FirebaseCloudService = {
                     'Firestore connections query timeout'
                 );
 
-                console.log(`[PARENT/CHILDREN] Cloud Firestore connections found: ${connSnap.size}`);
+                console.log("[PARENT/CHILDREN] connections found:", connSnap.size);
 
                 for (const doc of connSnap.docs) {
                     const data = doc.data();
@@ -216,14 +219,15 @@ const FirebaseCloudService = {
                             student_name: studentData.name || studentData.displayName || studentData.studentName || data.studentName || 'Student',
                             studentCode: studentData.studentCode || studentData.code || data.studentCode || sCode || 'STU',
                             student_code: studentData.studentCode || studentData.code || data.studentCode || sCode || 'STU',
-                            class: studentData.class || studentData.className || studentData.grade || data.class || 'Grade 8',
-                            class_name: studentData.class || studentData.className || studentData.grade || data.class || 'Grade 8',
-                            grade: studentData.class || studentData.className || studentData.grade || data.class || 'Grade 8',
+                            class: studentData.class || studentData.className || studentData.grade || data.class || '8',
+                            class_name: studentData.class || studentData.className || studentData.grade || data.class || '8',
+                            grade: studentData.class || studentData.className || studentData.grade || data.class || '8',
                             section: studentData.section || data.section || 'A',
-                            schoolName: studentData.schoolName || studentData.school || studentData.institution || 'SmartSlate Academy',
-                            school_name: studentData.schoolName || studentData.school || studentData.institution || 'SmartSlate Academy',
-                            educationLevel: studentData.educationLevel || studentData.level || data.educationLevel || 'High School',
-                            education_level: studentData.educationLevel || studentData.level || data.educationLevel || 'High School',
+                            school: studentData.school || studentData.schoolName || data.schoolName || 'SmartSlate Academy',
+                            schoolName: studentData.school || studentData.schoolName || data.schoolName || 'SmartSlate Academy',
+                            school_name: studentData.school || studentData.schoolName || data.schoolName || 'SmartSlate Academy',
+                            educationLevel: studentData.educationLevel || studentData.level || data.educationLevel || 'HIGH_SCHOOL',
+                            education_level: studentData.educationLevel || studentData.level || data.educationLevel || 'HIGH_SCHOOL',
                             status: 'Connected ✓'
                         };
 
@@ -241,6 +245,7 @@ const FirebaseCloudService = {
                 const conns = await firestoreRestQuery('student_parent_connections', [
                     { field: 'parentUid', value: { stringValue: safeParentUid } }
                 ]);
+                console.log("[PARENT/CHILDREN] REST connections found:", conns.length);
                 for (const c of conns) {
                     const studentUid = c.studentUid || c.student_uid || c.id.split('_')[0];
                     if (studentUid) {
@@ -252,14 +257,15 @@ const FirebaseCloudService = {
                             student_name: c.studentName || 'Student',
                             studentCode: c.studentCode || c.student_code || 'STU',
                             student_code: c.studentCode || c.student_code || 'STU',
-                            class: c.className || c.class || 'Grade 8',
-                            class_name: c.className || c.class || 'Grade 8',
-                            grade: c.className || c.class || 'Grade 8',
+                            class: c.className || c.class || '8',
+                            class_name: c.className || c.class || '8',
+                            grade: c.className || c.class || '8',
                             section: c.section || 'A',
+                            school: c.schoolName || 'SmartSlate Academy',
                             schoolName: c.schoolName || 'SmartSlate Academy',
                             school_name: c.schoolName || 'SmartSlate Academy',
-                            educationLevel: c.educationLevel || 'High School',
-                            education_level: c.educationLevel || 'High School',
+                            educationLevel: c.educationLevel || 'HIGH_SCHOOL',
+                            education_level: c.educationLevel || 'HIGH_SCHOOL',
                             status: 'Connected ✓'
                         });
                     }
@@ -268,7 +274,7 @@ const FirebaseCloudService = {
         }
 
         const finalChildren = Array.from(results.values());
-        console.log(`[PARENT/CHILDREN] Total unique children resolved: ${finalChildren.length}`);
+        console.log("[PARENT/CHILDREN] response ready - total:", finalChildren.length);
         return finalChildren;
     },
 
@@ -315,21 +321,22 @@ const FirebaseCloudService = {
             } catch (e) {}
         }
 
-        // 2. If student profile doc does not exist yet, create standard profile
+        // 2. If student profile doc does not exist yet, create canonical profile
         if (!student) {
             studentUid = `stu_${cleanCode.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
             student = {
                 uid: studentUid,
+                name: 'Student ' + cleanCode,
+                email: `student_${cleanCode.toLowerCase()}@smartslate.test`,
                 studentCode: cleanCode,
                 student_code: cleanCode,
-                name: 'Student ' + cleanCode,
-                studentName: 'Student ' + cleanCode,
-                class: 'Grade 8',
-                className: 'Grade 8',
-                grade: 'Grade 8',
+                educationLevel: 'HIGH_SCHOOL',
+                class: '8',
+                className: '8',
+                grade: '8',
                 section: 'A',
+                school: 'SmartSlate Academy',
                 schoolName: 'SmartSlate Academy',
-                educationLevel: 'High School',
                 parentIds: [safeParentUid]
             };
 
@@ -343,13 +350,15 @@ const FirebaseCloudService = {
         // 3. Create connection document in student_parent_connections
         const connId = `${studentUid}_${safeParentUid}`;
         const connectionData = {
-            studentUid,
             student_uid: studentUid,
-            parentUid: safeParentUid,
+            studentUid: studentUid,
             parent_uid: safeParentUid,
-            studentCode: cleanCode,
+            parentUid: safeParentUid,
             student_code: cleanCode,
+            studentCode: cleanCode,
+            parent_name: parentName || 'Parent',
             parentName: parentName || 'Parent',
+            student_name: student.name || student.studentName || 'Student',
             studentName: student.name || student.studentName || 'Student',
             status: 'active',
             createdAt: new Date().toISOString(),
@@ -382,14 +391,15 @@ const FirebaseCloudService = {
             student_name: student.name || student.studentName || 'Student',
             studentCode: cleanCode,
             student_code: cleanCode,
-            class: student.className || student.class || student.grade || 'Grade 8',
-            class_name: student.className || student.class || student.grade || 'Grade 8',
-            grade: student.className || student.class || student.grade || 'Grade 8',
+            class: student.class || student.className || '8',
+            class_name: student.class || student.className || '8',
+            grade: student.class || student.className || '8',
             section: student.section || 'A',
-            schoolName: student.schoolName || student.institution || 'SmartSlate Academy',
-            school_name: student.schoolName || student.institution || 'SmartSlate Academy',
-            educationLevel: student.educationLevel || 'High School',
-            education_level: student.educationLevel || 'High School',
+            school: student.school || student.schoolName || 'SmartSlate Academy',
+            schoolName: student.school || student.schoolName || 'SmartSlate Academy',
+            school_name: student.school || student.schoolName || 'SmartSlate Academy',
+            educationLevel: student.educationLevel || 'HIGH_SCHOOL',
+            education_level: student.educationLevel || 'HIGH_SCHOOL',
             status: 'Connected ✓'
         };
 
@@ -407,6 +417,154 @@ const FirebaseCloudService = {
             success: true,
             message: 'Student connected successfully',
             child: childObj
+        };
+    },
+
+    /**
+     * Fetch connected students for a teacher UID
+     */
+    async getTeacherStudents(teacherUid) {
+        console.log("[TEACHER/STUDENTS] start", teacherUid);
+        const safeTeacherUid = String(teacherUid || '').trim();
+
+        if (!safeTeacherUid) return [];
+        const results = new Map();
+
+        // 1. Check in-memory store
+        const mem = inMemoryTeacherConnections.get(safeTeacherUid) || [];
+        mem.forEach(s => results.set(String(s.uid || s.student_id), s));
+
+        // 2. Query Firebase Admin SDK
+        if (firestoreDb) {
+            try {
+                const connSnap = await withTimeout(
+                    firestoreDb.collection('student_teacher_connections')
+                        .where('teacherUid', '==', safeTeacherUid)
+                        .where('status', '==', 'active')
+                        .get(),
+                    8000
+                );
+
+                console.log("[TEACHER/STUDENTS] connections found:", connSnap.size);
+
+                for (const doc of connSnap.docs) {
+                    const data = doc.data();
+                    const studentUid = data.studentUid || data.student_uid || doc.id.split('_')[0];
+                    const sCode = data.studentCode || data.student_code || '';
+
+                    if (studentUid) {
+                        let studentData = {};
+                        try {
+                            const sDocSnap = await withTimeout(
+                                firestoreDb.collection('students').doc(studentUid).get(),
+                                4000
+                            );
+                            if (sDocSnap.exists) studentData = sDocSnap.data() || {};
+                        } catch (e) {}
+
+                        results.set(studentUid, {
+                            uid: studentUid,
+                            student_id: studentUid,
+                            name: studentData.name || studentData.studentName || data.studentName || 'Student',
+                            studentCode: studentData.studentCode || sCode || 'STU',
+                            class: studentData.class || studentData.className || '8',
+                            grade: studentData.class || studentData.className || '8',
+                            section: studentData.section || 'A',
+                            school: studentData.school || studentData.schoolName || 'SmartSlate Academy',
+                            educationLevel: studentData.educationLevel || 'HIGH_SCHOOL',
+                            subject: data.subject || 'All Subjects',
+                            status: 'Connected ✓'
+                        });
+                    }
+                }
+            } catch (e) {
+                console.warn("[TEACHER/STUDENTS] query note:", e.message);
+            }
+        }
+
+        return Array.from(results.values());
+    },
+
+    /**
+     * Link teacher to student via Student Code
+     */
+    async linkTeacherToStudent(teacherUid, studentCode, teacherName = 'Teacher', subject = 'All Subjects') {
+        const cleanCode = String(studentCode || '').trim().toUpperCase();
+        const safeTeacherUid = String(teacherUid || '').trim();
+
+        if (!cleanCode || !safeTeacherUid) throw new Error('Teacher and Student Code required');
+
+        let student = null;
+        let studentUid = null;
+
+        if (firestoreDb) {
+            try {
+                const snap = await firestoreDb.collection('students').where('studentCode', '==', cleanCode).limit(1).get();
+                if (!snap.empty) {
+                    studentUid = snap.docs[0].id;
+                    student = { uid: studentUid, ...snap.docs[0].data() };
+                }
+            } catch (e) {}
+        }
+
+        if (!student) {
+            studentUid = `stu_${cleanCode.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+            student = {
+                uid: studentUid,
+                name: 'Student ' + cleanCode,
+                studentCode: cleanCode,
+                class: '8',
+                section: 'A',
+                school: 'SmartSlate Academy',
+                educationLevel: 'HIGH_SCHOOL'
+            };
+            if (firestoreDb) {
+                firestoreDb.collection('students').doc(studentUid).set(student, { merge: true }).catch(() => {});
+            }
+        }
+
+        const connId = `${studentUid}_${safeTeacherUid}`;
+        const connectionData = {
+            student_uid: studentUid,
+            studentUid: studentUid,
+            teacher_uid: safeTeacherUid,
+            teacherUid: safeTeacherUid,
+            student_code: cleanCode,
+            studentCode: cleanCode,
+            teacher_name: teacherName,
+            student_name: student.name || 'Student',
+            subject: subject || 'All Subjects',
+            status: 'active',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+
+        if (firestoreDb) {
+            await firestoreDb.collection('student_teacher_connections').doc(connId).set(connectionData, { merge: true });
+        }
+
+        const studentObj = {
+            uid: studentUid,
+            student_id: studentUid,
+            name: student.name || 'Student',
+            studentCode: cleanCode,
+            class: student.class || '8',
+            grade: student.class || '8',
+            section: student.section || 'A',
+            school: student.school || 'SmartSlate Academy',
+            educationLevel: student.educationLevel || 'HIGH_SCHOOL',
+            subject: subject || 'All Subjects',
+            status: 'Connected ✓'
+        };
+
+        const existing = inMemoryTeacherConnections.get(safeTeacherUid) || [];
+        existing.push(studentObj);
+        inMemoryTeacherConnections.set(safeTeacherUid, existing);
+
+        return {
+            success: true,
+            message: 'Student connected successfully to teacher roster',
+            student: studentObj
         };
     }
 };

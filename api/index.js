@@ -2,9 +2,6 @@ const express = require('express');
 const path = require('path');
 const cors = require('cors');
 
-const { initDb } = require('../server/db/database');
-const { seed } = require('../server/db/seed');
-
 const authRoutes = require('../server/routes/auth');
 const parentRoutes = require('../server/routes/parent');
 const teacherRoutes = require('../server/routes/teacher');
