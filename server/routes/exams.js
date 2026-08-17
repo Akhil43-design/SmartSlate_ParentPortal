@@ -3,7 +3,7 @@ const router = express.Router();
 const { get, all, run } = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { requireRole } = require('../middleware/rbac');
-const SyncQueueManager = require('../../../shared/services/syncQueue');
+const SyncQueueManager = require('../../shared/services/syncQueue');
 
 // GET /api/exams - Teacher / Parent exams list
 router.get('/', authenticateToken, async (req, res) => {

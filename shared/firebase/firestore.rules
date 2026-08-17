@@ -1,0 +1,94 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isConnectedParent(studentUid) {
+      return signedIn() &&
+        (
+          (resource != null && resource.data.parentIds != null && request.auth.uid in resource.data.parentIds) ||
+          (exists(/databases/$(database)/documents/students/$(studentUid)) &&
+           request.auth.uid in get(/databases/$(database)/documents/students/$(studentUid)).data.parentIds) ||
+          exists(/databases/$(database)/documents/student_parent_connections/$(studentUid + '_' + request.auth.uid))
+        );
+    }
+
+    function isConnectedTeacher(studentUid) {
+      return signedIn() &&
+        (
+          (resource != null && resource.data.teacherIds != null && request.auth.uid in resource.data.teacherIds) ||
+          (exists(/databases/$(database)/documents/students/$(studentUid)) &&
+           request.auth.uid in get(/databases/$(database)/documents/students/$(studentUid)).data.teacherIds) ||
+          exists(/databases/$(database)/documents/student_teacher_connections/$(studentUid + '_' + request.auth.uid))
+        );
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow write: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /students/{uid} {
+      allow read: if signedIn() &&
+                     (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+
+      allow create: if signedIn() &&
+                       request.auth.uid == uid &&
+                       request.resource.data.uid == request.auth.uid;
+
+      allow update: if signedIn() &&
+                       (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+
+      allow delete: if signedIn() &&
+                       request.auth.uid == uid;
+
+      match /tasks/{taskId} {
+        allow read: if signedIn() &&
+                       (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+        allow write: if signedIn() && request.auth.uid == uid;
+      }
+
+      match /notes/{noteId} {
+        allow read: if signedIn() &&
+                       (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+        allow create, update, delete: if signedIn() &&
+                                              request.auth.uid == uid;
+      }
+
+      match /books/{bookId} {
+        allow read: if signedIn() &&
+                       (request.auth.uid == uid || isConnectedParent(uid) || isConnectedTeacher(uid));
+        allow create, update, delete: if signedIn() &&
+                                              request.auth.uid == uid;
+      }
+    }
+
+    match /parents/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == uid;
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /teachers/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == uid;
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /student_parent_connections/{connectionId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if signedIn();
+    }
+
+    match /student_teacher_connections/{connectionId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if signedIn();
+    }
+  }
+}

@@ -48,9 +48,14 @@ app.use(errorLogger);
 let dbInitialized = false;
 async function ensureDb() {
     if (!dbInitialized) {
-        await initDb();
-        await seed();
-        dbInitialized = true;
+        try {
+            if (typeof initDb === 'function') await initDb();
+            if (typeof seed === 'function') await seed();
+            dbInitialized = true;
+        } catch (err) {
+            console.warn('[Vercel Serverless] DB init notice:', err.message);
+            dbInitialized = true;
+        }
     }
 }
 
