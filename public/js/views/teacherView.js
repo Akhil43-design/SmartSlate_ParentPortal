@@ -370,10 +370,10 @@ const TeacherView = {
             return this.renderTabContent(container);
         }
 
-        const student = this.students.find(s => s.student_id == this.selectedStudentId || s.student_uid == this.selectedStudentId || s.student_code == this.selectedStudentId);
-        const sName = student ? (student.name || student.student_name) : 'Student Profile';
-        const sCode = student ? (student.student_code || '') : '';
-        const sClass = student ? (student.class || student.class_name || 'Class 8') : 'Class 8';
+        const student = this.students.find(s => s.student_id == this.selectedStudentId || s.student_uid == this.selectedStudentId || s.uid == this.selectedStudentId || s.student_code == this.selectedStudentId || s.studentCode == this.selectedStudentId);
+        const sName = student ? (student.name || student.student_name || 'Student') : 'Student Profile';
+        const sCode = student ? (student.studentCode || student.student_code || '') : '';
+        const sClass = student ? (student.class || student.class_name || student.grade || 'Class 8') : 'Class 8';
         const sSec = student ? (student.section || 'A') : 'A';
         const sSubj = student ? (student.subject || 'Mathematics') : 'Mathematics';
         const sEmail = student ? (student.email || student.student_email || '') : '';

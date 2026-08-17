@@ -228,203 +228,47 @@ router.get('/search-students', authenticateToken, requireRole('teacher'), async 
 router.get('/students', authenticateToken, requireRole('teacher'), async (req, res) => {
     try {
         const teacherUid = String(req.user.uid || req.user.id);
-        const teacherUser = await get("SELECT id, name, email, teacher_code, subject FROM users WHERE id = ?", [req.user.id]).catch(() => null);
-        const teacherCode = teacherUser?.teacher_code || req.user.teacherCode || req.user.teacher_code || `TCH-${req.user.id}`;
-        const teacherSubject = teacherUser?.subject || req.user.subject || 'Mathematics';
+        console.log("[TEACHER] Authenticated UID:", teacherUid);
+        console.log("[TEACHER] Querying connections for:", teacherUid);
 
-        // 1. Direct teacher connections
-        const directConns = await all(
-            `SELECT stc.*, s.id as s_id, s.user_id as s_user_id, s.firebase_uid as s_firebase_uid,
-                    s.grade as s_grade, s.class_name as s_class_name, s.section as s_section, s.education_level as s_education_level,
-                    u.name as u_name, u.email as u_email,
-                    COALESCE(s.class_name, s.grade, c.name, 'Grade 8') as class_name,
-                    COALESCE(s.section, c.section, 'A') as section,
-                    COALESCE(s.education_level, 'High School') as education_level,
-                    COALESCE(s.school_name, 'SmartSlate Academy') as school_name
-             FROM student_teacher_connections stc
-             LEFT JOIN students s ON (stc.student_uid = s.user_id OR stc.student_code = s.student_code OR stc.student_uid = s.firebase_uid)
-             LEFT JOIN users u ON (s.user_id = u.id OR stc.student_code = u.student_code)
-             LEFT JOIN classes c ON s.class_id = c.id
-             WHERE (stc.teacher_uid = ? OR stc.teacher_uid = ? OR stc.teacher_code = ?) AND stc.status = 'active'`,
-            [teacherUid, String(req.user.id), teacherCode]
-        ).catch(() => []);
+        // 1. Primary Cloud Authority: Firestore via Firebase Admin SDK
+        const cloudStudents = await FirebaseCloudService.getTeacherStudents(teacherUid);
+        console.log("[TEACHER] Connections found:", cloudStudents.length);
+        console.log("[TEACHER] Students returned:", cloudStudents.length);
 
-        // 2. Class roster students
-        const classStudents = await all(
-            `SELECT s.id as student_id, s.user_id as student_uid, s.firebase_uid, s.student_code, u.name as student_name, u.email as student_email,
-                    COALESCE(s.class_name, s.grade, c.name, 'Grade 8') as class_name,
-                    COALESCE(s.section, c.section, 'A') as section,
-                    COALESCE(s.education_level, 'High School') as education_level,
-                    COALESCE(s.school_name, 'SmartSlate Academy') as school_name,
-                    COUNT(DISTINCT sub.id) as submissions_count,
-                    AVG((er.score / er.total_points) * 100) as avg_exam_score
-             FROM classes c
-             JOIN students s ON c.id = s.class_id
-             JOIN users u ON s.user_id = u.id
-             LEFT JOIN submissions sub ON s.id = sub.student_id
-             LEFT JOIN exam_results er ON s.id = er.student_id
-             WHERE c.teacher_id = ?
-             GROUP BY s.id`,
-            [req.user.id]
-        ).catch(() => []);
-
-        const map = new Map();
-        
-        classStudents.forEach(s => {
-            const key = String(s.student_code || s.student_id);
-            map.set(key, {
-                student_id: s.student_id,
-                student_uid: s.firebase_uid || s.student_uid,
-                student_code: s.student_code,
-                student_name: s.student_name,
-                name: s.student_name,
-                email: s.student_email || '',
-                student_email: s.student_email || '',
-                class_name: s.class_name,
-                class: s.class_name,
-                grade: s.class_name,
-                section: s.section || 'A',
-                school_name: s.school_name,
-                school: s.school_name,
-                education_level: s.education_level || 'High School',
-                subject: teacherSubject,
-                subjects: [teacherSubject],
-                status: 'active',
-                submissions_count: s.submissions_count || 0,
-                avg_exam_score: s.avg_exam_score !== null && s.avg_exam_score !== undefined ? Math.round(s.avg_exam_score) : 92
-            });
+        return res.status(200).json({
+            success: true,
+            students: cloudStudents
         });
-
-        for (const s of directConns) {
-            const key = String(s.student_code || s.s_id || s.student_uid);
-            const resolvedName = s.student_name || s.u_name || 'Student';
-            
-            console.log('[TEACHER STUDENT LOOKUP]');
-            console.log(`Connection found: YES`);
-            console.log(`Student profile found: ${s.u_name || s.student_name ? 'YES' : 'NO'}`);
-            console.log(`Student UID: ${s.student_uid}`);
-            console.log(`Profile UID: ${s.s_firebase_uid || s.s_user_id || s.student_uid}`);
-            console.log(`Student Code: ${s.student_code}`);
-
-            if (!map.has(key)) {
-                // Calculate real submission and exam counts
-                const realSubs = await get("SELECT COUNT(id) as cnt FROM submissions WHERE student_id = ? OR student_id = ?", [s.s_id, s.s_user_id]).catch(() => ({ cnt: 0 }));
-                const realExams = await get("SELECT AVG((score / total_points) * 100) as avg_score FROM exam_results WHERE student_id = ? OR student_id = ?", [s.s_id, s.s_user_id]).catch(() => ({ avg_score: null }));
-
-                map.set(key, {
-                    student_id: s.s_id || s.student_uid,
-                    student_uid: s.s_firebase_uid || s.student_uid || s.s_user_id || s.student_id,
-                    student_code: s.student_code,
-                    student_name: resolvedName,
-                    name: resolvedName,
-                    email: s.u_email || s.student_email || '',
-                    student_email: s.u_email || s.student_email || '',
-                    class_name: s.class_name || 'Grade 8',
-                    class: s.class_name || 'Grade 8',
-                    grade: s.class_name || 'Grade 8',
-                    section: s.section || 'A',
-                    school_name: s.school_name || 'SmartSlate Academy',
-                    school: s.school_name || 'SmartSlate Academy',
-                    education_level: s.education_level || 'High School',
-                    subject: s.subject || teacherSubject,
-                    subjects: [s.subject || teacherSubject],
-                    status: 'active',
-                    submissions_count: (realSubs && realSubs.cnt > 0) ? realSubs.cnt : (s.submissions_count || 0),
-                    avg_exam_score: (realExams && realExams.avg_score) ? Math.round(realExams.avg_score) : 92
-                });
-            } else {
-                const cur = map.get(key);
-                if (s.subject && !cur.subjects.includes(s.subject)) {
-                    cur.subjects.push(s.subject);
-                }
-            }
-        }
-
-        res.json({ students: Array.from(map.values()) });
     } catch (err) {
-        console.error('Fetch all students error:', err);
-        res.status(500).json({ error: 'Error fetching students.' });
+        console.error('[Teacher Firebase Error]', err);
+        return res.status(500).json({
+            success: false,
+            error: 'Unable to load teacher students: ' + err.message,
+            students: []
+        });
     }
 });
 
-// GET /api/teacher/students/:classId - Get students list with progress snapshot
+// GET /api/teacher/students/:classId - Get students list filtered by class
 router.get('/students/:classId', authenticateToken, requireRole('teacher'), async (req, res) => {
     try {
-        const classId = req.params.classId;
         const teacherUid = String(req.user.uid || req.user.id);
-        const teacherUser = await get("SELECT id, name, email, teacher_code, subject FROM users WHERE id = ?", [req.user.id]).catch(() => null);
-        const teacherCode = teacherUser?.teacher_code || req.user.teacherCode || req.user.teacher_code || `TCH-${req.user.id}`;
-        const teacherSubject = teacherUser?.subject || req.user.subject || 'Mathematics';
+        const classId = req.params.classId;
+        const allStudents = await FirebaseCloudService.getTeacherStudents(teacherUid);
 
-        const classStudents = await all(
-            `SELECT s.id as student_id, s.student_code, u.name as student_name, u.email,
-                    COALESCE(c.name, 'Class 8') as class_name, 'A' as section,
-                    COUNT(DISTINCT sub.id) as submissions_count,
-                    AVG((er.score / er.total_points) * 100) as avg_exam_score
-             FROM students s
-             JOIN users u ON s.user_id = u.id
-             LEFT JOIN classes c ON s.class_id = c.id
-             LEFT JOIN submissions sub ON s.id = sub.student_id
-             LEFT JOIN exam_results er ON s.id = er.student_id
-             WHERE s.class_id = ?
-             GROUP BY s.id
-             ORDER BY u.name ASC`,
-            [classId]
-        ).catch(() => []);
-
-        // Also fetch connected students
-        const directConns = await all(
-            `SELECT stc.*, s.id as s_id, s.user_id as s_user_id, u.name as u_name, u.email as u_email,
-                    COALESCE(c.name, 'Class 8') as class_name, 'A' as section,
-                    'SmartSlate Academy' as school_name
-             FROM student_teacher_connections stc
-             LEFT JOIN students s ON (stc.student_uid = s.user_id OR stc.student_code = s.student_code)
-             LEFT JOIN users u ON (s.user_id = u.id OR stc.student_code = u.student_code)
-             LEFT JOIN classes c ON s.class_id = c.id
-             WHERE (stc.teacher_uid = ? OR stc.teacher_uid = ? OR stc.teacher_code = ?) AND stc.status = 'active'`,
-            [teacherUid, String(req.user.id), teacherCode]
-        ).catch(() => []);
-
-        const map = new Map();
-        classStudents.forEach(s => {
-            const key = String(s.student_code || s.student_id);
-            map.set(key, {
-                ...s,
-                name: s.student_name,
-                class: s.class_name,
-                subject: teacherSubject,
-                status: 'Connected ✓',
-                avg_exam_score: s.avg_exam_score !== null && s.avg_exam_score !== undefined ? Math.round(s.avg_exam_score) : 92
+        if (classId && classId !== 'all') {
+            const filtered = allStudents.filter(s => {
+                const sClassId = `class-${(s.class || s.grade || '8').toLowerCase()}-${(s.section || 'a').toLowerCase()}`;
+                return s.class == classId || s.grade == classId || sClassId == classId;
             });
-        });
+            return res.json({ success: true, students: filtered });
+        }
 
-        directConns.forEach(s => {
-            const key = String(s.student_code || s.s_id || s.student_uid);
-            const resolvedName = s.student_name || s.u_name || 'Student';
-            if (!map.has(key)) {
-                map.set(key, {
-                    student_id: s.s_id || s.student_uid,
-                    student_uid: s.student_uid || s.s_user_id,
-                    student_code: s.student_code,
-                    student_name: resolvedName,
-                    name: resolvedName,
-                    email: s.u_email || s.student_email || '',
-                    class_name: s.class_name || 'Class 8',
-                    class: s.class_name || 'Class 8',
-                    section: s.section || 'A',
-                    school_name: 'SmartSlate Academy',
-                    subject: s.subject || teacherSubject,
-                    status: 'Connected ✓',
-                    submissions_count: 2,
-                    avg_exam_score: 92
-                });
-            }
-        });
-
-        res.json({ students: Array.from(map.values()) });
+        return res.json({ success: true, students: allStudents });
     } catch (err) {
         console.error('Fetch class students error:', err);
-        res.status(500).json({ error: 'Error fetching class students.' });
+        return res.status(500).json({ success: false, error: 'Error fetching class students.', students: [] });
     }
 });
 
