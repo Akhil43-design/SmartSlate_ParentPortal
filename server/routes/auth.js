@@ -420,9 +420,7 @@ router.post('/login', authRateLimiter, async (req, res) => {
 });
 
 // Get Logged In User
-router.get('/me', authenticateToken, async (req, res) => {
-    console.time("[AUTH/ME] total");
-    console.time("[AUTH/ME] session");
+router.get('/me', authenticateToken, (req, res) => {
     try {
         const formatted = {
             id: req.user.id || req.user.uid,
@@ -436,17 +434,14 @@ router.get('/me', authenticateToken, async (req, res) => {
             parentCode: req.user.parentCode || req.user.parent_code || (req.user.role === 'parent' ? `PAR-${req.user.id}` : null),
             subject: req.user.subject || 'Mathematics'
         };
-        console.timeEnd("[AUTH/ME] session");
 
-        return res.json({
+        return res.status(200).json({
             success: true,
             user: formatted
         });
     } catch (err) {
-        console.error('Auth /me error:', err);
-        return res.json({ success: true, user: req.user });
-    } finally {
-        console.timeEnd("[AUTH/ME] total");
+        console.error('[AUTH/ME] Error:', err);
+        return res.status(200).json({ success: true, user: req.user });
     }
 });
 

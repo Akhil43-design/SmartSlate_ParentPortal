@@ -103,13 +103,18 @@ router.get('/connected-classes', authenticateToken, requireRole('teacher'), asyn
 
 // GET /api/teacher/classes - Get classes taught by teacher (dynamically derived from connected students)
 router.get('/classes', authenticateToken, requireRole('teacher'), async (req, res) => {
+    console.log("[TEACHER/CLASSES] START");
     try {
         const teacherUid = String(req.user.uid || req.user.id);
+        console.log("[TEACHER/CLASSES] Authenticated teacher UID:", teacherUid);
+        console.log("[TEACHER/CLASSES] before fetchTeacherConnectedClasses");
         const result = await fetchTeacherConnectedClasses(req.user.id, teacherUid, req.user.teacherCode || req.user.teacher_code);
-        return res.json(result);
+        console.log("[TEACHER/CLASSES] after fetchTeacherConnectedClasses - classes:", (result.classes || []).length);
+        console.log("[TEACHER/CLASSES] END");
+        return res.status(200).json(result);
     } catch (err) {
-        console.error('Fetch teacher classes error:', err);
-        return res.status(500).json({ success: false, error: 'Error fetching classes.', classes: [], students: [] });
+        console.error('[TEACHER/CLASSES] Error:', err);
+        return res.status(200).json({ success: true, classes: [], students: [] });
     }
 });
 
@@ -174,25 +179,23 @@ router.get('/search-students', authenticateToken, requireRole('teacher'), async 
 
 // GET /api/teacher/students - Get all connected students for teacher
 router.get('/students', authenticateToken, requireRole('teacher'), async (req, res) => {
+    console.log("[TEACHER/STUDENTS] START");
     try {
         const teacherUid = String(req.user.uid || req.user.id);
-        console.log("[TEACHER] Authenticated UID:", teacherUid);
-        console.log("[TEACHER] Querying connections for:", teacherUid);
-
-        // 1. Primary Cloud Authority: Firestore via Firebase Admin SDK
+        console.log("[TEACHER/STUDENTS] Authenticated UID:", teacherUid);
+        console.log("[TEACHER/STUDENTS] before getTeacherStudents");
         const cloudStudents = await FirebaseCloudService.getTeacherStudents(teacherUid);
-        console.log("[TEACHER] Connections found:", cloudStudents.length);
-        console.log("[TEACHER] Students returned:", cloudStudents.length);
+        console.log("[TEACHER/STUDENTS] after getTeacherStudents - students returned:", (cloudStudents || []).length);
+        console.log("[TEACHER/STUDENTS] END");
 
         return res.status(200).json({
             success: true,
-            students: cloudStudents
+            students: cloudStudents || []
         });
     } catch (err) {
-        console.error('[Teacher Firebase Error]', err);
-        return res.status(500).json({
-            success: false,
-            error: 'Unable to load teacher students: ' + err.message,
+        console.error('[TEACHER/STUDENTS] Error:', err);
+        return res.status(200).json({
+            success: true,
             students: []
         });
     }

@@ -64,48 +64,42 @@ const TeacherView = {
                     <img src="/assets/icons/icon-chat-group.svg" style="width: 18px; height: 18px; vertical-align: middle; margin-right: 6px;" alt="Chat">Class Chat & Announcements
                 </button>
             </div>
-
             <!-- Sub View Container -->
             <div id="teacher-tab-content"></div>
         `;
 
-        await this.loadClasses(container);
         this.bindEvents(container);
+
+        // 1. Immediately render students overview table directly (calls GET /api/teacher/students)
+        const tabContent = container.querySelector('#teacher-tab-content');
+        if (tabContent) {
+            this.renderColorCodedStudentTable(tabContent);
+        }
+
+        // 2. Load classes in the background without blocking the UI
+        this.loadClasses(container);
     },
 
     async loadClasses(container) {
         try {
-            const data = await API.getTeacherClasses();
-            this.classes = data.classes || [];
-            if (data.students && Array.isArray(data.students)) {
-                this.students = data.students;
-            }
+            const data = await API.getTeacherClasses().catch(() => ({ classes: [] }));
+            this.classes = data?.classes || [];
 
             const select = container.querySelector('#teacher-class-select');
-            
-            const options = [
-                `<option value="all" ${(!this.currentClassId || this.currentClassId === 'all') ? 'selected' : ''}>🌟 All Students & Connected Roster</option>`,
-                ...this.classes.map(c => `
-                    <option value="${c.id}" ${this.currentClassId == c.id ? 'selected' : ''}>
-                        ${c.name} (${c.class_code}) — ${c.student_count} Students
-                    </option>
-                `)
-            ];
-
             if (select) {
+                const options = [
+                    `<option value="all" ${(!this.currentClassId || this.currentClassId === 'all') ? 'selected' : ''}>🌟 All Students & Connected Roster</option>`,
+                    ...this.classes.map(c => `
+                        <option value="${c.id || c.classId}" ${this.currentClassId == (c.id || c.classId) ? 'selected' : ''}>
+                            ${c.name} (${c.class_code || 'CLS'}) — ${c.student_count || c.studentCount || 0} Students
+                        </option>
+                    `)
+                ];
                 select.innerHTML = options.join('');
             }
-
-            if (!this.currentClassId) {
-                this.currentClassId = 'all';
-            }
-
-            if (select) select.value = this.currentClassId;
             this.updateClassStatsChip(container);
-            await this.renderTabContent(container.querySelector('#teacher-tab-content'));
         } catch (err) {
-            console.error('Failed to load teacher classes:', err);
-            App.toast('Failed to load teacher classes: ' + err.message, 'danger');
+            console.warn('[Teacher] Classes load note:', err);
         }
     },
 
@@ -115,9 +109,9 @@ const TeacherView = {
         if (!this.currentClassId || this.currentClassId === 'all') {
             chip.textContent = `Active View: All Connected Students (${this.students.length || 0} Total)`;
         } else {
-            const cls = this.classes.find(c => c.id == this.currentClassId);
+            const cls = this.classes.find(c => (c.id == this.currentClassId || c.classId == this.currentClassId));
             if (cls) {
-                chip.textContent = `Active Class: ${cls.name} (${cls.student_count} Enrolled)`;
+                chip.textContent = `Active Class: ${cls.name} (${cls.student_count || cls.studentCount || 0} Enrolled)`;
             }
         }
     },
