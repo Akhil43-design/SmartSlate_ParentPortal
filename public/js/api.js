@@ -171,10 +171,25 @@ const API = {
         return this.request('/api/teacher/students');
     },
 
-    createAssignment(class_id, title, description, due_at) {
+    createAssignment(target_class, title, description, due_at, subject) {
+        const payload = typeof target_class === 'object'
+            ? target_class
+            : { class_id: target_class, target_class, title, description, due_at, subject };
         return this.request('/api/assignments', {
             method: 'POST',
-            body: JSON.stringify({ class_id, title, description, due_at })
+            body: JSON.stringify(payload)
+        });
+    },
+
+    getAnnouncements() {
+        return this.request('/api/chat/announcements');
+    },
+
+    createAnnouncement(title, content, classId, subject) {
+        const payload = typeof title === 'object' ? title : { title, content, classId, subject };
+        return this.request('/api/chat/announcements', {
+            method: 'POST',
+            body: JSON.stringify(payload)
         });
     },
 

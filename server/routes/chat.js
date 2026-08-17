@@ -56,4 +56,36 @@ router.post('/send', authenticateToken, async (req, res) => {
     }
 });
 
+// GET /api/chat/announcements
+router.get('/announcements', authenticateToken, async (req, res) => {
+    try {
+        const FirebaseCloudService = require('../services/firebaseAdmin');
+        const teacherUid = String(req.user.uid || req.user.id);
+        const announcements = await FirebaseCloudService.getTeacherAnnouncements(teacherUid);
+        res.json({ success: true, announcements });
+    } catch (err) {
+        res.json({ success: true, announcements: [] });
+    }
+});
+
+// POST /api/chat/announcements
+router.post('/announcements', authenticateToken, async (req, res) => {
+    try {
+        const FirebaseCloudService = require('../services/firebaseAdmin');
+        const { title, content, message, classId, subject } = req.body;
+        const teacherUid = String(req.user.uid || req.user.id);
+        const ann = await FirebaseCloudService.createAnnouncement({
+            title: title || 'Class Announcement',
+            content: content || message || '',
+            classId: classId || 'all',
+            subject: subject || 'General Notice',
+            teacherName: req.user.name || 'Class Teacher',
+            teacherUid
+        });
+        res.status(201).json({ success: true, message: 'Announcement posted successfully!', announcement: ann });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;

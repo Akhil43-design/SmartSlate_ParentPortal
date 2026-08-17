@@ -4,12 +4,22 @@ const { get, all, run } = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { requireRole } = require('../middleware/rbac');
 const SyncQueueManager = require('../../shared/services/syncQueue');
+const FirebaseCloudService = require('../services/firebaseAdmin');
 
 // GET /api/exams - Teacher / Parent exams list
 router.get('/', authenticateToken, async (req, res) => {
     try {
         if (req.user.role === 'teacher') {
-            const exams = await all(
+            const teacherUid = String(req.user.uid || req.user.id);
+            
+            // 1. Get exams from Firebase Cloud Firestore
+            let cloudExams = [];
+            try {
+                cloudExams = await FirebaseCloudService.getTeacherExams(teacherUid);
+            } catch (e) {}
+
+            // 2. Get exams from SQLite
+            const sqliteExams = await all(
                 `SELECT e.*, 
                         COALESCE(e.target_class, c.name, 'Class 8') as class_name,
                         (SELECT COUNT(*) FROM exam_submissions es WHERE es.exam_id = e.id) as submissions_count,
@@ -23,29 +33,49 @@ router.get('/', authenticateToken, async (req, res) => {
                 [req.user.id, req.user.uid || req.user.id]
             ).catch(() => []);
 
-            const formattedExams = exams.map(e => {
-                let questions = [];
-                try { questions = JSON.parse(e.questions_json || '[]'); } catch(err) {}
-                let totalMarks = questions.reduce((sum, q) => sum + (parseFloat(q.marks) || 1), 0);
-                if (totalMarks === 0) totalMarks = 100;
-
-                return {
+            const examMap = new Map();
+            cloudExams.forEach(e => {
+                const id = String(e.id || e.examId);
+                examMap.set(id, {
                     ...e,
-                    questions_count: questions.length,
-                    total_marks: totalMarks,
-                    exam_type: e.exam_type || 'written'
-                };
+                    id,
+                    target_class: e.targetClass || e.target_class || 'Class 8',
+                    class_name: e.className || e.targetClass || e.target_class || 'Class 8',
+                    questions_count: (e.questions || []).length,
+                    total_marks: (e.questions || []).reduce((sum, q) => sum + (parseFloat(q.marks) || 1), 0) || 100,
+                    exam_type: e.exam_type || e.examType || 'written',
+                    submissions_count: e.submissions_count || 0,
+                    active_count: e.active_count || 0,
+                    violations_count: e.violations_count || 0
+                });
             });
 
-            return res.json({ exams: formattedExams });
+            sqliteExams.forEach(e => {
+                const id = String(e.id);
+                if (!examMap.has(id)) {
+                    let questions = [];
+                    try { questions = JSON.parse(e.questions_json || '[]'); } catch(err) {}
+                    let totalMarks = questions.reduce((sum, q) => sum + (parseFloat(q.marks) || 1), 0);
+                    if (totalMarks === 0) totalMarks = 100;
+                    examMap.set(id, {
+                        ...e,
+                        questions,
+                        questions_count: questions.length,
+                        total_marks: totalMarks,
+                        exam_type: e.exam_type || 'written'
+                    });
+                }
+            });
+
+            return res.json({ exams: Array.from(examMap.values()) });
         }
 
         if (req.user.role === 'parent') {
             const { studentId } = req.query;
             if (!studentId) return res.status(400).json({ error: 'studentId is required' });
 
-            const student = await get("SELECT class_id FROM students WHERE id = ? OR user_id = ?", [studentId, studentId]);
-            if (!student) return res.json({ exams: [] });
+            const student = await get("SELECT class_id FROM students WHERE id = ? OR user_id = ?", [studentId, studentId]).catch(() => null);
+            const classId = student?.class_id || 1;
 
             const exams = await all(
                 `SELECT e.id, e.title, e.subject, e.exam_type, e.duration_minutes, e.start_date, e.start_time, e.end_date, e.end_time,
@@ -54,7 +84,7 @@ router.get('/', authenticateToken, async (req, res) => {
                  LEFT JOIN exam_submissions es ON e.id = es.exam_id AND (es.student_id = ? OR es.student_uid = ?)
                  WHERE e.class_id = ? OR e.target_class = (SELECT name FROM classes WHERE id = ?)
                  ORDER BY e.created_at DESC`,
-                [studentId, studentId, student.class_id, student.class_id]
+                [studentId, studentId, classId, classId]
             ).catch(() => []);
             return res.json({ exams });
         }
@@ -88,78 +118,58 @@ router.post('/', authenticateToken, requireRole('teacher'), async (req, res) => 
             end_time
         } = req.body;
 
-        const targetClassStr = String(target_class || targetClass || class_id || '').trim();
+        const targetClassStr = String(target_class || targetClass || class_id || 'Class 8').trim();
         const targetSectionStr = String(target_section || targetSection || 'All').trim();
-        const educationLevelStr = String(education_level || educationLevel || '').trim();
+        const educationLevelStr = String(education_level || educationLevel || 'HIGH_SCHOOL').trim();
 
-        if (!targetClassStr || !title || !questions || !Array.isArray(questions) || questions.length === 0) {
-            return res.status(400).json({ error: 'Target Class, Exam Title, and at least one Question are required.' });
+        if (!title || !questions || !Array.isArray(questions) || questions.length === 0) {
+            return res.status(400).json({ error: 'Exam Title and at least one Question are required.' });
         }
 
         const teacherUid = String(req.user.uid || req.user.id);
-        const teacherUser = await get("SELECT id, name, email, teacher_code, subject FROM users WHERE id = ?", [req.user.id]).catch(() => null);
-        const teacherCode = teacherUser?.teacher_code || req.user.teacherCode || req.user.teacher_code || `TCH-${req.user.id}`;
-        const teacherSubject = subject || teacherUser?.subject || req.user.subject || 'Mathematics';
+        const teacherSubject = subject || req.user.subject || 'Mathematics';
         const finalExamType = exam_type === 'mcq' ? 'mcq' : 'written';
 
-        // 1. Get all connected students for this teacher
-        const directConns = await all(
-            `SELECT stc.*, s.id as s_id, s.user_id as s_user_id, s.firebase_uid as s_firebase_uid, s.class_id as s_class_id,
-                    s.grade as s_grade, s.class_name as s_class_name, s.section as s_section, s.education_level as s_education_level,
-                    u.name as u_name, u.email as u_email,
-                    COALESCE(s.grade, s.class_name, c.name, 'Grade 8') as resolved_grade,
-                    COALESCE(s.section, c.section, 'A') as resolved_section,
-                    COALESCE(s.education_level, 'High School') as resolved_education_level
-             FROM student_teacher_connections stc
-             LEFT JOIN students s ON (stc.student_uid = s.user_id OR stc.student_code = s.student_code OR stc.student_uid = s.firebase_uid)
-             LEFT JOIN users u ON (s.user_id = u.id OR stc.student_code = u.student_code)
-             LEFT JOIN classes c ON s.class_id = c.id
-             WHERE (stc.teacher_uid = ? OR stc.teacher_uid = ? OR stc.teacher_code = ?) AND stc.status = 'active'`,
-            [teacherUid, String(req.user.id), teacherCode]
-        ).catch(() => []);
+        // 1. Get all connected students from Firebase Cloud Service first
+        let allConnectedStudents = [];
+        try {
+            allConnectedStudents = await FirebaseCloudService.getTeacherStudents(teacherUid);
+        } catch (e) {}
 
-        const classStudents = await all(
-            `SELECT s.id as s_id, s.user_id as s_user_id, s.firebase_uid as s_firebase_uid, s.class_id as s_class_id,
-                    s.grade as s_grade, s.class_name as s_class_name, s.section as s_section, s.education_level as s_education_level,
-                    u.name as u_name, u.email as u_email,
-                    COALESCE(s.grade, s.class_name, c.name, 'Grade 8') as resolved_grade,
-                    COALESCE(s.section, c.section, 'A') as resolved_section,
-                    COALESCE(s.education_level, 'High School') as resolved_education_level
-             FROM classes c
-             JOIN students s ON c.id = s.class_id
-             JOIN users u ON s.user_id = u.id
-             WHERE c.teacher_id = ?`,
-            [req.user.id]
-        ).catch(() => []);
+        // Fallback to SQLite if empty
+        if (!allConnectedStudents || allConnectedStudents.length === 0) {
+            const directConns = await all(
+                `SELECT stc.*, s.id as s_id, s.user_id as s_user_id, s.firebase_uid as s_firebase_uid, s.class_id as s_class_id,
+                        s.grade as s_grade, s.class_name as s_class_name, s.section as s_section, s.education_level as s_education_level,
+                        u.name as u_name, u.email as u_email,
+                        COALESCE(s.grade, s.class_name, c.name, 'Grade 8') as resolved_grade,
+                        COALESCE(s.section, c.section, 'A') as resolved_section,
+                        COALESCE(s.education_level, 'High School') as resolved_education_level
+                 FROM student_teacher_connections stc
+                 LEFT JOIN students s ON (stc.student_uid = s.user_id OR stc.student_code = s.student_code OR stc.student_uid = s.firebase_uid)
+                 LEFT JOIN users u ON (s.user_id = u.id OR stc.student_code = u.student_code)
+                 LEFT JOIN classes c ON s.class_id = c.id
+                 WHERE (stc.teacher_uid = ? OR stc.teacher_uid = ?) AND stc.status = 'active'`,
+                [teacherUid, String(req.user.id)]
+            ).catch(() => []);
 
-        // Deduplicate connected students
-        const studentMap = new Map();
-        [...classStudents, ...directConns].forEach(st => {
-            const key = String(st.s_firebase_uid || st.s_user_id || st.student_uid || st.s_id);
-            if (!studentMap.has(key)) {
-                studentMap.set(key, {
-                    ...st,
-                    grade: (st.s_grade || st.resolved_grade || st.class_name || 'Grade 8').trim(),
-                    section: (st.s_section || st.resolved_section || 'A').trim().toUpperCase(),
-                    educationLevel: (st.s_education_level || st.resolved_education_level || 'High School').trim(),
-                    name: st.u_name || st.student_name || 'Student',
-                    uid: st.s_firebase_uid || st.s_user_id || st.student_uid || String(st.s_id)
-                });
-            }
-        });
-        const allConnectedStudents = Array.from(studentMap.values());
+            allConnectedStudents = directConns.map(st => ({
+                ...st,
+                grade: (st.s_grade || st.resolved_grade || st.class_name || 'Grade 8').trim(),
+                section: (st.s_section || st.resolved_section || 'A').trim().toUpperCase(),
+                educationLevel: (st.s_education_level || st.resolved_education_level || 'High School').trim(),
+                name: st.u_name || st.student_name || 'Student',
+                uid: st.s_firebase_uid || st.s_user_id || st.student_uid || String(st.s_id)
+            }));
+        }
 
-        // 2. Derive available unique classes
-        const availableClasses = [...new Set(allConnectedStudents.map(s => s.grade).filter(Boolean))];
-
-        // 3. Match target class and section
-        const matchingStudents = allConnectedStudents.filter(s => {
-            const sGrade = String(s.grade || s.class_name || '').trim();
+        // 2. Filter matching students
+        const matchingStudents = (allConnectedStudents || []).filter(s => {
+            const sGrade = String(s.grade || s.class_name || s.class || '').trim();
             const sSection = String(s.section || 'A').trim().toUpperCase();
-            const sEdu = String(s.educationLevel || '').trim();
 
-            const classMatch = sGrade.toLowerCase() === targetClassStr.toLowerCase() ||
-                               sGrade.replace(/[^a-z0-9]/gi, '').toLowerCase() === targetClassStr.replace(/[^a-z0-9]/gi, '').toLowerCase() ||
+            const classMatch = !targetClassStr ||
+                               sGrade.toLowerCase() === targetClassStr.toLowerCase() ||
                                sGrade.toLowerCase().includes(targetClassStr.toLowerCase()) ||
                                targetClassStr.toLowerCase().includes(sGrade.toLowerCase());
 
@@ -167,20 +177,10 @@ router.post('/', authenticateToken, requireRole('teacher'), async (req, res) => 
                                  !targetSectionStr ||
                                  sSection === targetSectionStr.toUpperCase();
 
-            const eduMatch = !educationLevelStr || !sEdu || (sEdu.toLowerCase() === educationLevelStr.toLowerCase());
-
-            return classMatch && sectionMatch && eduMatch;
+            return classMatch && sectionMatch;
         });
 
-        // 4. Validate that teacher has connected students in target class
-        if (matchingStudents.length === 0 && allConnectedStudents.length > 0) {
-            return res.status(403).json({
-                error: `Teacher is not connected to any students in ${targetClassStr} (Section: ${targetSectionStr}).`,
-                availableClasses
-            });
-        }
-
-        // 5. Build secure question list and secret answer key
+        // 3. Build question list and secret answer key
         const answerKey = {};
         const sanitizedQuestions = questions.map((q, idx) => {
             const qId = q.id || `q_${idx + 1}`;
@@ -190,101 +190,96 @@ router.post('/', authenticateToken, requireRole('teacher'), async (req, res) => 
             return {
                 id: qId,
                 type: finalExamType,
-                question: q.question || '',
+                question: q.question || q.text || '',
+                text: q.text || q.question || '',
                 options: q.options || (finalExamType === 'mcq' ? { A: '', B: '', C: '', D: '' } : null),
                 marks: parseFloat(q.marks) || (finalExamType === 'mcq' ? 1 : 10)
             };
         });
 
-        // 6. Resolve dates and times
+        // 4. Dates and times
         const todayStr = new Date().toISOString().split('T')[0];
         const startDate = start_date || todayStr;
         const startTime = start_time || '09:00';
         const endDate = end_date || startDate;
         const endTime = end_time || '23:59';
         const durationMins = parseInt(duration_minutes, 10) || 60;
+        const generatedExamId = `exam_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
 
-        // 7. Resolve target class row in database
-        let targetClassId = class_id;
-        const existingClass = await get("SELECT id, name FROM classes WHERE id = ? OR LOWER(name) = LOWER(?)", [class_id, targetClassStr]).catch(() => null);
-        if (existingClass) {
-            targetClassId = existingClass.id;
-        } else {
-            const newClass = await run(
-                "INSERT INTO classes (name, teacher_id, class_code, section) VALUES (?, ?, ?, ?)",
-                [targetClassStr, req.user.id, `CLASS-${targetClassStr.replace(/\s+/g, '')}-${Date.now().toString().slice(-4)}`, targetSectionStr]
-            ).catch(() => ({ id: 64 }));
-            targetClassId = newClass.id || 64;
-        }
-
-        // 8. Insert exam into SQLite
-        const result = await run(
-            `INSERT INTO exams (
-                class_id, title, questions_json, duration_minutes, created_by, 
-                target_class, target_section, education_level, subject, exam_type, start_date, start_time, end_date, end_time, answer_key
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-                targetClassId,
-                title.trim(),
-                JSON.stringify(sanitizedQuestions),
-                durationMins,
-                req.user.id,
-                targetClassStr,
-                targetSectionStr,
-                educationLevelStr,
-                teacherSubject,
-                finalExamType,
-                startDate,
-                startTime,
-                endDate,
-                endTime,
-                JSON.stringify(answerKey)
-            ]
-        );
-
-        // 9. Notify matching students
-        for (const st of matchingStudents) {
-            const userId = st.uid || st.s_user_id || st.student_uid;
-            if (userId) {
-                await run(
-                    "INSERT INTO notifications (user_id, type, content) VALUES (?, 'exam', ?)",
-                    [userId, `New ${finalExamType.toUpperCase()} Exam Published: "${title.trim()}" for ${startDate}`]
-                ).catch(() => {});
-            }
-        }
-
-        // 10. Enqueue to sync queue
-        await SyncQueueManager.enqueue('CREATE', 'exam', result.id, {
-            class_id: targetClassId,
-            target_class: targetClassStr,
-            target_section: targetSectionStr,
-            education_level: educationLevelStr,
-            subject: teacherSubject,
+        // 5. Publish to Cloud Firestore
+        const recipientUids = (matchingStudents.length > 0 ? matchingStudents : allConnectedStudents).map(s => s.uid || s.student_uid || s.student_id);
+        const cloudExamPayload = {
+            id: generatedExamId,
+            examId: generatedExamId,
             title: title.trim(),
+            subject: teacherSubject,
+            target_class: targetClassStr,
+            targetClass: targetClassStr,
+            target_section: targetSectionStr,
+            targetSection: targetSectionStr,
+            education_level: educationLevelStr,
+            educationLevel: educationLevelStr,
             exam_type: finalExamType,
+            duration_minutes: durationMins,
+            durationMinutes: durationMins,
             questions: sanitizedQuestions,
-            answer_key: answerKey,
             start_date: startDate,
             start_time: startTime,
             end_date: endDate,
             end_time: endTime,
-            duration_minutes: durationMins,
-            created_by: req.user.id,
-            recipientStudentUids: matchingStudents.map(s => s.uid || s.s_user_id || s.student_uid)
-        }).catch(() => {});
+            created_by: teacherUid,
+            teacherUid: teacherUid,
+            recipientStudentUids: recipientUids
+        };
 
-        console.log(`[EXAM CREATED] ID: ${result.id} | Type: ${finalExamType} | Title: "${title}" | Target: ${targetClassStr} (${targetSectionStr}) | Recipients: ${matchingStudents.length}`);
+        try {
+            await FirebaseCloudService.createExam(cloudExamPayload);
+        } catch (e) {
+            console.warn('[EXAM] Cloud creation error:', e.message);
+        }
+
+        // 6. Optional SQLite persist
+        let sqliteId = generatedExamId;
+        try {
+            const resSql = await run(
+                `INSERT INTO exams (
+                    class_id, title, questions_json, duration_minutes, created_by, 
+                    target_class, target_section, education_level, subject, exam_type, start_date, start_time, end_date, end_time, answer_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    class_id || 1,
+                    title.trim(),
+                    JSON.stringify(sanitizedQuestions),
+                    durationMins,
+                    req.user.id,
+                    targetClassStr,
+                    targetSectionStr,
+                    educationLevelStr,
+                    teacherSubject,
+                    finalExamType,
+                    startDate,
+                    startTime,
+                    endDate,
+                    endTime,
+                    JSON.stringify(answerKey)
+                ]
+            ).catch(() => null);
+            if (resSql?.id) sqliteId = resSql.id;
+        } catch (e) {}
+
+        console.log(`[EXAM CREATED] ID: ${generatedExamId} | Type: ${finalExamType} | Title: "${title}" | Recipients: ${recipientUids.length}`);
 
         res.status(201).json({
             success: true,
             message: `${finalExamType.toUpperCase()} Exam created successfully!`,
-            examId: result.id,
+            examId: generatedExamId,
+            id: generatedExamId,
             targetClass: targetClassStr,
             targetSection: targetSectionStr,
             educationLevel: educationLevelStr,
             examType: finalExamType,
-            recipientCount: matchingStudents.length,
-            recipients: matchingStudents.map(s => ({ uid: s.uid, name: s.name, code: s.student_code }))
+            recipientCount: recipientUids.length,
+            recipients: (matchingStudents.length > 0 ? matchingStudents : allConnectedStudents).map(s => ({ uid: s.uid, name: s.name, code: s.student_code || s.studentCode }))
         });
     } catch (err) {
         console.error('Create exam error:', err);

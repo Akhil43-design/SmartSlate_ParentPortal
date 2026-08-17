@@ -1093,36 +1093,53 @@ const TeacherView = {
 
     // 6. Assignments List
     async renderAssignments(container) {
-        if (!this.currentClassId) return;
-        const res = await API.getAssignments(this.currentClassId);
+        const res = await API.getAssignments(this.currentClassId || undefined).catch(() => ({ assignments: [] }));
         const assignments = res.assignments || [];
 
         container.innerHTML = `
-            <div class="glass-card" style="padding: 20px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <h3 style="font-size: 18px; font-weight: 700;">Class Assignments</h3>
+            <div class="glass-card" style="padding: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+                    <div>
+                        <h3 style="font-size: 20px; font-weight: 800; margin: 0 0 4px 0; display: flex; align-items: center; gap: 8px;">
+                            <img src="/assets/icons/icon-assignment.svg" style="width: 24px; height: 24px;" alt="Assignments">
+                            <span>Class Assignments</span>
+                        </h3>
+                        <p style="font-size: 13px; color: var(--text-secondary); margin: 0;">Create and evaluate written homework tasks and MCQ quizzes</p>
+                    </div>
                     <button class="glass-btn glass-btn-primary bouncy-btn" onclick="TeacherView.showNewAssignmentFormModal()">+ New Assignment</button>
                 </div>
 
-                ${assignments.length === 0 ? '<p style="color: var(--text-muted); text-align: center; padding: 20px;">No assignments created yet for this class.</p>' : ''}
-                <div style="display: flex; flex-direction: column; gap: 12px;">
-                    ${assignments.map(a => `
-                        <div class="glass-card" style="padding: 16px;">
-                            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                                <div>
-                                    <h4 style="font-size: 16px; font-weight: 700;">${a.title}</h4>
-                                    <p style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">${a.description || 'No description'}</p>
-                                    <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">
-                                        Due: <strong>${a.due_at ? new Date(a.due_at).toLocaleDateString() : 'No date'}</strong> | Submissions: <strong>${a.submission_count || 0}</strong>
+                ${assignments.length === 0 ? `
+                    <div style="text-align: center; padding: 50px 20px; color: var(--text-muted); background: rgba(255,255,255,0.4); border-radius: 14px;">
+                        <div style="font-size: 36px; margin-bottom: 8px;">📝</div>
+                        <h4 style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin: 0 0 4px 0;">No assignments created yet</h4>
+                        <p style="font-size: 13px; margin: 0 0 14px 0;">Publish a new assignment for your connected students.</p>
+                        <button class="glass-btn glass-btn-primary glass-btn-sm" onclick="TeacherView.showNewAssignmentFormModal()">+ Create Assignment</button>
+                    </div>
+                ` : `
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        ${assignments.map(a => `
+                            <div class="glass-card" style="padding: 18px; background: rgba(255,255,255,0.9); border: 1.5px solid var(--border-color); border-radius: 12px;">
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+                                    <div>
+                                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                            <span class="glass-badge" style="background: #E0E7FF; color: #3730A3; font-weight: 800; font-size: 11px;">Class: ${a.target_class || a.class_name || 'Class 8'}</span>
+                                            <span class="glass-badge" style="background: #F3F4F6; color: #4B5563; font-weight: 800; font-size: 11px;">${a.subject || 'Mathematics'}</span>
+                                        </div>
+                                        <h4 style="font-size: 16px; font-weight: 800; color: var(--text-primary); margin: 0 0 4px 0;">${a.title}</h4>
+                                        <p style="font-size: 13px; color: var(--text-secondary); margin: 0 0 8px 0;">${a.description || 'No description provided.'}</p>
+                                        <div style="font-size: 12px; color: var(--text-muted);">
+                                            ⏱️ Due: <strong>${a.due_at ? new Date(a.due_at).toLocaleDateString() : 'No deadline'}</strong> | 📬 Submissions: <strong>${a.submission_count || 0}</strong>
+                                        </div>
                                     </div>
+                                    <button class="glass-btn glass-btn-secondary glass-btn-sm bouncy-btn btn-view-submissions" data-id="${a.id}" data-title="${a.title}">
+                                        <span>View Submissions & Grade →</span>
+                                    </button>
                                 </div>
-                                <button class="glass-btn glass-btn-secondary glass-btn-sm bouncy-btn btn-view-submissions" data-id="${a.id}" data-title="${a.title}">
-                                    <span>View Submissions & Grade →</span>
-                                </button>
                             </div>
-                        </div>
-                    `).join('')}
-                </div>
+                        `).join('')}
+                    </div>
+                `}
             </div>
         `;
 

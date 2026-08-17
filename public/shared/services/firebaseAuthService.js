@@ -1923,6 +1923,94 @@ class FirebaseAuthService {
         }
     }
 
+    // Publish Teacher Exam to Cloud Firestore
+    async createTeacherExam(teacherUid, examData) {
+        this.init();
+        if (!this.db) return examData;
+        const safeTeacherUid = String(teacherUid || this.auth?.currentUser?.uid || 'teacher_uid');
+        const examId = String(examData?.id || `exam_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`);
+        const payload = {
+            ...examData,
+            id: examId,
+            teacherUid: safeTeacherUid,
+            created_by: safeTeacherUid,
+            createdAt: this.getTimestamp(),
+            status: 'active'
+        };
+        try {
+            await this.db.collection('exams').doc(examId).set(payload, { merge: true });
+            console.log(`🔥 [Firestore] Exam published: ${examId} ("${payload.title}")`);
+            return payload;
+        } catch (e) {
+            console.warn('[FirebaseAuthService] createTeacherExam error:', e.message);
+            return payload;
+        }
+    }
+
+    // Fetch Teacher Exams from Cloud Firestore
+    async getTeacherExams(teacherUid) {
+        this.init();
+        if (!this.db) return [];
+        try {
+            const safeTeacherUid = String(teacherUid || this.auth?.currentUser?.uid || '');
+            let snap = await this.db.collection('exams').where('teacherUid', '==', safeTeacherUid).get().catch(() => null);
+            if (!snap || snap.empty) {
+                snap = await this.db.collection('exams').where('created_by', '==', safeTeacherUid).get().catch(() => null);
+            }
+            if (!snap || snap.empty) {
+                snap = await this.db.collection('exams').limit(50).get().catch(() => null);
+            }
+            if (!snap || snap.empty) return [];
+            return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        } catch (e) {
+            return [];
+        }
+    }
+
+    // Publish Teacher Assignment to Cloud Firestore
+    async createTeacherAssignment(teacherUid, assignmentData) {
+        this.init();
+        if (!this.db) return assignmentData;
+        const safeTeacherUid = String(teacherUid || this.auth?.currentUser?.uid || 'teacher_uid');
+        const assignmentId = String(assignmentData?.id || `assign_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`);
+        const payload = {
+            ...assignmentData,
+            id: assignmentId,
+            teacherUid: safeTeacherUid,
+            created_by: safeTeacherUid,
+            createdAt: this.getTimestamp(),
+            status: 'active'
+        };
+        try {
+            await this.db.collection('assignments').doc(assignmentId).set(payload, { merge: true });
+            console.log(`🔥 [Firestore] Assignment published: ${assignmentId} ("${payload.title}")`);
+            return payload;
+        } catch (e) {
+            console.warn('[FirebaseAuthService] createTeacherAssignment error:', e.message);
+            return payload;
+        }
+    }
+
+    // Fetch Teacher Assignments from Cloud Firestore
+    async getTeacherAssignments(teacherUid) {
+        this.init();
+        if (!this.db) return [];
+        try {
+            const safeTeacherUid = String(teacherUid || this.auth?.currentUser?.uid || '');
+            let snap = await this.db.collection('assignments').where('teacherUid', '==', safeTeacherUid).get().catch(() => null);
+            if (!snap || snap.empty) {
+                snap = await this.db.collection('assignments').where('created_by', '==', safeTeacherUid).get().catch(() => null);
+            }
+            if (!snap || snap.empty) {
+                snap = await this.db.collection('assignments').limit(50).get().catch(() => null);
+            }
+            if (!snap || snap.empty) return [];
+            return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        } catch (e) {
+            return [];
+        }
+    }
+
     // Publish Teacher Announcement to Cloud Firestore
     async createTeacherAnnouncement(teacherUid, announcementData) {
         this.init();

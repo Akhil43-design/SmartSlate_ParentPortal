@@ -654,6 +654,203 @@ const FirebaseCloudService = {
             message: 'Student connected successfully to teacher roster',
             student: studentObj
         };
+    },
+
+    // -------------------------------------------------------------
+    // EXAMS
+    // -------------------------------------------------------------
+    async createExam(examData) {
+        const examId = String(examData.id || `exam_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`);
+        const payload = {
+            id: examId,
+            examId: examId,
+            title: String(examData.title || '').trim(),
+            subject: String(examData.subject || 'Mathematics').trim(),
+            target_class: String(examData.target_class || examData.targetClass || 'Class 8').trim(),
+            targetClass: String(examData.target_class || examData.targetClass || 'Class 8').trim(),
+            target_section: String(examData.target_section || examData.targetSection || 'All').trim(),
+            targetSection: String(examData.target_section || examData.targetSection || 'All').trim(),
+            education_level: String(examData.education_level || examData.educationLevel || 'HIGH_SCHOOL').trim(),
+            exam_type: String(examData.exam_type || examData.examType || 'written').trim(),
+            duration_minutes: parseInt(examData.duration_minutes || examData.durationMinutes || 60, 10),
+            questions: examData.questions || [],
+            start_date: examData.start_date || new Date().toISOString().split('T')[0],
+            start_time: examData.start_time || '09:00',
+            end_date: examData.end_date || examData.start_date || new Date().toISOString().split('T')[0],
+            end_time: examData.end_time || '23:59',
+            created_by: String(examData.created_by || examData.teacherUid || 'teacher_uid'),
+            teacherUid: String(examData.created_by || examData.teacherUid || 'teacher_uid'),
+            recipientStudentUids: examData.recipientStudentUids || [],
+            createdAt: new Date().toISOString(),
+            status: 'active'
+        };
+
+        if (firestoreDb) {
+            await firestoreDb.collection('exams').doc(examId).set(payload, { merge: true }).catch(err => {
+                console.warn('[EXAM] Firestore doc set warning:', err.message);
+            });
+        } else {
+            firestoreRestSet('exams', examId, payload).catch(() => {});
+        }
+
+        return payload;
+    },
+
+    async getTeacherExams(teacherUid) {
+        const safeTeacherUid = String(teacherUid || 'teacher_priya_01');
+        const results = [];
+
+        if (firestoreDb) {
+            try {
+                const snap = await Promise.race([
+                    firestoreDb.collection('exams').where('teacherUid', '==', safeTeacherUid).get(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500))
+                ]);
+                if (snap && !snap.empty) {
+                    snap.docs.forEach(d => results.push({ id: d.id, ...d.data() }));
+                }
+            } catch (e) {}
+
+            if (results.length === 0) {
+                try {
+                    const snapAll = await Promise.race([
+                        firestoreDb.collection('exams').where('created_by', '==', safeTeacherUid).get(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500))
+                    ]);
+                    if (snapAll && !snapAll.empty) {
+                        snapAll.docs.forEach(d => results.push({ id: d.id, ...d.data() }));
+                    }
+                } catch (e) {}
+            }
+        }
+
+        return results;
+    },
+
+    // -------------------------------------------------------------
+    // ASSIGNMENTS
+    // -------------------------------------------------------------
+    async createAssignment(assignData) {
+        const assignId = String(assignData.id || `assign_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`);
+        const payload = {
+            id: assignId,
+            assignmentId: assignId,
+            title: String(assignData.title || '').trim(),
+            description: String(assignData.description || '').trim(),
+            subject: String(assignData.subject || 'Mathematics').trim(),
+            target_class: String(assignData.target_class || assignData.targetClass || 'Class 8').trim(),
+            targetClass: String(assignData.target_class || assignData.targetClass || 'Class 8').trim(),
+            due_at: String(assignData.due_at || assignData.dueAt || new Date().toISOString()).trim(),
+            dueAt: String(assignData.due_at || assignData.dueAt || new Date().toISOString()).trim(),
+            created_by: String(assignData.created_by || assignData.teacherUid || 'teacher_uid'),
+            teacherUid: String(assignData.created_by || assignData.teacherUid || 'teacher_uid'),
+            recipientStudentUids: assignData.recipientStudentUids || [],
+            createdAt: new Date().toISOString(),
+            status: 'active'
+        };
+
+        if (firestoreDb) {
+            await firestoreDb.collection('assignments').doc(assignId).set(payload, { merge: true }).catch(err => {
+                console.warn('[ASSIGNMENT] Firestore doc set warning:', err.message);
+            });
+        } else {
+            firestoreRestSet('assignments', assignId, payload).catch(() => {});
+        }
+
+        return payload;
+    },
+
+    async getTeacherAssignments(teacherUid) {
+        const safeTeacherUid = String(teacherUid || 'teacher_priya_01');
+        const results = [];
+
+        if (firestoreDb) {
+            try {
+                const snap = await Promise.race([
+                    firestoreDb.collection('assignments').where('teacherUid', '==', safeTeacherUid).get(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500))
+                ]);
+                if (snap && !snap.empty) {
+                    snap.docs.forEach(d => results.push({ id: d.id, ...d.data() }));
+                }
+            } catch (e) {}
+
+            if (results.length === 0) {
+                try {
+                    const snapAll = await Promise.race([
+                        firestoreDb.collection('assignments').where('created_by', '==', safeTeacherUid).get(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500))
+                    ]);
+                    if (snapAll && !snapAll.empty) {
+                        snapAll.docs.forEach(d => results.push({ id: d.id, ...d.data() }));
+                    }
+                } catch (e) {}
+            }
+        }
+
+        return results;
+    },
+
+    // -------------------------------------------------------------
+    // ANNOUNCEMENTS
+    // -------------------------------------------------------------
+    async createAnnouncement(annData) {
+        const annId = String(annData.id || `ann_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`);
+        const payload = {
+            id: annId,
+            announcementId: annId,
+            title: String(annData.title || 'Class Announcement').trim(),
+            content: String(annData.content || annData.message || '').trim(),
+            subject: String(annData.subject || 'General Notice').trim(),
+            classId: String(annData.classId || 'all').trim(),
+            teacherName: String(annData.teacherName || 'Class Teacher').trim(),
+            created_by: String(annData.created_by || annData.teacherUid || 'teacher_uid'),
+            teacherUid: String(annData.created_by || annData.teacherUid || 'teacher_uid'),
+            createdAt: new Date().toISOString()
+        };
+
+        const inMemoryAnn = inMemoryTeacherConnections.get('announcements') || [];
+        inMemoryAnn.unshift(payload);
+        inMemoryTeacherConnections.set('announcements', inMemoryAnn);
+
+        if (firestoreDb) {
+            await firestoreDb.collection('announcements').doc(annId).set(payload, { merge: true }).catch(() => {});
+        } else {
+            firestoreRestSet('announcements', annId, payload).catch(() => {});
+        }
+
+        return payload;
+    },
+
+    async getTeacherAnnouncements(teacherUid) {
+        const results = [];
+        if (firestoreDb) {
+            try {
+                const snap = await Promise.race([
+                    firestoreDb.collection('announcements').orderBy('createdAt', 'desc').limit(20).get(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500))
+                ]);
+                if (snap && !snap.empty) {
+                    snap.docs.forEach(d => results.push({ id: d.id, ...d.data() }));
+                }
+            } catch (e) {
+                try {
+                    const snapFallback = await firestoreDb.collection('announcements').get();
+                    if (!snapFallback.empty) {
+                        snapFallback.docs.forEach(d => results.push({ id: d.id, ...d.data() }));
+                    }
+                } catch (err) {}
+            }
+        }
+
+        const mem = inMemoryTeacherConnections.get('announcements') || [];
+        mem.forEach(m => {
+            if (!results.find(r => r.id === m.id)) {
+                results.push(m);
+            }
+        });
+
+        return results;
     }
 };
 
